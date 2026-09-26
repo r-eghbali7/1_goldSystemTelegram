@@ -12,7 +12,7 @@ def get_default_cart_expiration():
     # سبد خرید به صورت پیش‌فرض ۳۰ دقیقه اعتبار دارد
     return timezone.now() + timedelta(minutes=30)
 
-class Cart(models.fields.Model):
+class Cart(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='carts', verbose_name="کاربر")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
@@ -40,7 +40,7 @@ class Cart(models.fields.Model):
     def __str__(self):
         return f"سبد {self.id} - کاربر {self.user.phone_number}"
 
-class CartItem(models.fields.Model):
+class CartItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items', verbose_name="سبد خرید")
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="محصول")

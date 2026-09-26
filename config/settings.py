@@ -46,6 +46,17 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
+    # پکیج‌های شخص ثالث
+    'rest_framework',
+    'rest_framework_simplejwt',
+    
+    # اپلیکیشن‌های پروژه
+    'accounts.apps.AccountsConfig',
+    'products.apps.ProductsConfig',
+    'carts.apps.CartsConfig',
+    'orders.apps.OrdersConfig',
+    'api.apps.ApiConfig',
 ]
 
 MIDDLEWARE = [
@@ -124,8 +135,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATICFILS_DIRS = BASE_DIR / 'static'
 
-
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+# حتماً این خط را در انتهای فایل اضافه کنید تا مدل کاستوم کاربر شناخته شود
+AUTH_USER_MODEL = 'accounts.User'
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
