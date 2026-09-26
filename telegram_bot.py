@@ -1,27 +1,29 @@
 import os
+import re
 import httpx
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # لود کردن متغیرهای محیطی از فایل .env
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
 
 # آدرس پایه APIهای جنگو (در حالت لوکال)
 BASE_API_URL = "http://127.0.0.1:8000/api/v1"
+DJANGO_SERVER_URL = "http://127.0.0.1:8000"
 
 # تعریف مراحل (States) برای ConversationHandler
 WAITING_FOR_OTP = 1
+SUPPORT_MODE = 2
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /start و درخواست شماره تماس"""
-    # بررسی اینکه آیا کاربر از قبل توکن لاگین دارد یا خیر
     if 'access_token' in context.user_data:
         await show_main_menu(update, context)
         return ConversationHandler.END
 
-    # ساخت دکمه درخواست شماره تماس امن تلگرام
     keyboard = [[KeyboardButton(text="ارسال شماره تماس 📱", request_contact=True)]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     
@@ -30,7 +32,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "برای مشاهده محصولات و ثبت سفارش، لطفاً شماره تماس خود را از طریق دکمه زیر ارسال کنید:",
         reply_markup=reply_markup
     )
-    # از آنجا که دریافت کانتکت هندلر خودش را دارد، نیازی به تغییر وضعیت در اینجا نیست
     return ConversationHandler.END
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,16 +39,13 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact = update.message.contact
     phone_number = contact.phone_number
 
-    # فرمت کردن شماره (گاهی تلگرام شماره را با کد کشور مثلا +98912... می‌فرستد)
     if phone_number.startswith('+98'):
         phone_number = '0' + phone_number[3:]
     elif phone_number.startswith('98'):
         phone_number = '0' + phone_number[2:]
 
-    # ذخیره موقت شماره برای مرحله بعد
     context.user_data['temp_phone'] = phone_number
 
-    # ارسال درخواست به API جنگو (Send OTP)
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -90,7 +88,6 @@ async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if response.status_code == 200:
                 data = response.json()
-                # ذخیره توکن در مموری ربات برای استفاده در APIهای بعدی
                 context.user_data['access_token'] = data['tokens']['access']
                 
                 await update.message.reply_text("احراز هویت با موفقیت انجام شد! ✅")
@@ -112,15 +109,256 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    # اگر از داخل تابع دیگری فراخوانی شده باشد ممکن است update.message در دسترس نباشد (مثل callback)
     message = update.message if update.message else update.callback_query.message
     await message.reply_text("لطفاً یک گزینه را انتخاب کنید:", reply_markup=reply_markup)
 
+async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت اطلاعات سبد خرید از API و نمایش پیش‌فاکتور"""
+    access_token = context.user_data.get('access_token')
+    
+    if not access_token:
+        await update.message.reply_text("لطفاً ابتدا احراز هویت کنید. دستور /start را بزنید.")
+        return
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{BASE_API_URL}/carts/", headers=headers, timeout=10.0)
+            
+            if response.status_code == 404:
+                await update.message.reply_text("سبد خرید شما خالی است 🛒")
+                return
+            elif response.status_code == 200:
+                cart_data = response.json()
+                items = cart_data.get('items', [])
+                total_price = cart_data.get('total_price', 0)
+                
+                if not items:
+                    await update.message.reply_text("سبد خرید شما خالی است 🛒")
+                    return
+
+                text = "🧾 **پیش فاکتور شما:**\n\n"
+                for idx, item in enumerate(items, 1):
+                    product_title = item['product']['title']
+                    final_price = item['final_price']
+                    text += f"{idx}. {product_title}\nقیمت: {final_price:,} تومان\n\n"
+                
+                text += f"💳 **مبلغ کل قابل پرداخت:** {total_price:,} تومان\n"
+                
+                keyboard = [
+                    [InlineKeyboardButton("تسویه حساب و پرداخت 💳", callback_data="process_checkout")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            else:
+                await update.message.reply_text("مشکلی در دریافت سبد خرید به وجود آمد.")
+                
+        except httpx.RequestError:
+            await update.message.reply_text("خطا در ارتباط با سرور.")
+
+async def process_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تایید نهایی سبد، ساخت سفارش در جنگو و دریافت لینک زرین‌پال"""
+    query = update.callback_query
+    await query.answer()
+    
+    access_token = context.user_data.get('access_token')
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    await query.edit_message_text("⏳ در حال اتصال به درگاه پرداخت...")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(f"{BASE_API_URL}/orders/checkout/", headers=headers, timeout=15.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                payment_url = data['payment_url']
+                order_id = data['order_id']
+                
+                keyboard = [
+                    [InlineKeyboardButton("رفتن به درگاه زرین‌پال 🔗", url=payment_url)]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                success_text = (
+                    f"✅ فاکتور شما با موفقیت صادر شد.\n"
+                    f"شماره سفارش: `{order_id}`\n\n"
+                    f"برای پرداخت روی دکمه زیر کلیک کنید. پس از پرداخت موفق، نتیجه از همین طریق به شما اطلاع داده می‌شود."
+                )
+                await query.edit_message_text(success_text, reply_markup=reply_markup, parse_mode="Markdown")
+            
+            elif response.status_code == 400:
+                await query.edit_message_text("❌ سبد خرید شما نامعتبر یا منقضی شده است.")
+            else:
+                error_detail = response.json().get('detail', 'خطای نامشخص')
+                await query.edit_message_text(f"❌ خطا در صدور فاکتور: {error_detail}")
+                
+        except httpx.RequestError:
+            await query.edit_message_text("خطا در برقراری ارتباط با سرور بانکی.")
+
+async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ورود به بخش پشتیبانی و تغییر کیبورد"""
+    keyboard = [[KeyboardButton("بازگشت 🔙")]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "🎧 شما به بخش پشتیبانی متصل شدید.\n\n"
+        "متن، عکس یا ویس خود را ارسال کنید تا مستقیماً به مدیریت ارجاع داده شود.\n"
+        "برای خروج از حالت پشتیبانی، دکمه «بازگشت 🔙» را بزنید.",
+        reply_markup=reply_markup
+    )
+    return SUPPORT_MODE
+
+async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت پیام کاربر و کپی کردن آن برای ادمین"""
+    user = update.message.from_user
+    
+    await update.message.copy(chat_id=ADMIN_CHAT_ID)
+    
+    await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=f"👤 فرستنده: {user.first_name}\n💬 آیدی عددی: {user.id}\n"
+             f"جهت پاسخ دادن، روی همین پیام ریپلای (Reply) کنید.",
+    )
+
+    await update.message.reply_text("✅ پیام شما دریافت شد. ادمین به زودی پاسخ خواهد داد.")
+    return SUPPORT_MODE
+
+async def exit_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """خروج از پشتیبانی و بازگشت به منوی اصلی"""
+    await update.message.reply_text("شما از بخش پشتیبانی خارج شدید.")
+    await show_main_menu(update, context) 
+    return ConversationHandler.END
+
+async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت پاسخ ادمین و ارسال آن برای کاربر"""
+    if str(update.message.chat_id) == str(ADMIN_CHAT_ID) and update.message.reply_to_message:
+        original_text = update.message.reply_to_message.text
+        
+        if original_text and "آیدی عددی:" in original_text:
+            match = re.search(r'آیدی عددی:\s*(\d+)', original_text)
+            if match:
+                user_chat_id = match.group(1)
+                
+                try:
+                    await context.bot.send_message(chat_id=user_chat_id, text="🎧 پاسخ پشتیبانی:\n")
+                    await update.message.copy(chat_id=user_chat_id)
+                    await update.message.reply_text("پاسخ شما با موفقیت برای کاربر ارسال شد ✅")
+                except Exception as e:
+                    await update.message.reply_text(f"خطا در ارسال پیام به کاربر. ممکن است ربات را بلاک کرده باشد.\nارور: {e}")
+
+async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE):
+    """تابع کمکی برای دریافت یک صفحه خاص از محصولات و ارسال آن‌ها به کاربر"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{BASE_API_URL}/products/?page={page}", timeout=10.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                products = data.get('results', []) 
+                
+                if not products:
+                    await context.bot.send_message(chat_id, "هیچ محصولی یافت نشد.")
+                    return
+
+                for p in products:
+                    text = f"💎 **{p['title']}**\n\n"
+                    text += f"📝 توضیحات: {p['description']}\n"
+                    text += f"⚖️ وزن: {p['weight']} گرم\n"
+                    text += f"💰 قیمت پایه: {p['price']:,} تومان\n"
+                    
+                    keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p['id']}")]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+
+                    image_path = p.get('image')
+                    if image_path:
+                        image_url = f"{DJANGO_SERVER_URL}{image_path}"
+                        await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=text, reply_markup=reply_markup, parse_mode="Markdown")
+                    else:
+                        await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+
+                nav_buttons = []
+                if data.get('previous'):
+                    nav_buttons.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"page_{page-1}"))
+                
+                nav_buttons.append(InlineKeyboardButton(f"صفحه {page}", callback_data="ignore"))
+                
+                if data.get('next'):
+                    nav_buttons.append(InlineKeyboardButton("بعدی ▶️", callback_data=f"page_{page+1}"))
+
+                if len(nav_buttons) > 1:
+                    await context.bot.send_message(
+                        chat_id=chat_id, 
+                        text="🔽 صفحات فروشگاه:", 
+                        reply_markup=InlineKeyboardMarkup([nav_buttons])
+                    )
+            else:
+                await context.bot.send_message(chat_id, "خطا در دریافت اطلاعات فروشگاه.")
+        except httpx.RequestError:
+            await context.bot.send_message(chat_id, "ارتباط با سرور قطع است.")
+
+async def view_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر کلیک روی دکمه 'مشاهده فروشگاه' از کیبورد اصلی"""
+    await update.message.reply_text("⏳ در حال دریافت جدیدترین کارهای گالری...")
+    await fetch_and_send_products(update.message.chat_id, 1, context)
+
+async def change_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر کلیک روی دکمه‌های صفحه‌بندی (Next/Prev)"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "ignore":
+        return
+
+    page_number = int(query.data.split('_')[1])
+    
+    await query.edit_message_text(f"⏳ در حال بارگذاری صفحه {page_number}...")
+    await fetch_and_send_products(query.message.chat_id, page_number, context)
+    await query.message.delete()
+
+async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر کلیک روی دکمه 'افزودن به سبد خرید' محصولات"""
+    query = update.callback_query
+    
+    product_id = query.data.replace('add_cart_', '').strip()
+    
+    access_token = context.user_data.get('access_token')
+    if not access_token:
+        await query.answer("❌ لطفاً ابتدا شماره تماس خود را در ربات ثبت کنید.", show_alert=True)
+        return
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{BASE_API_URL}/carts/", 
+                json={"product_id": product_id}, 
+                headers=headers
+            )
+            
+            if response.status_code == 201:
+                await query.answer("✅ محصول با موفقیت به سبد خرید شما اضافه شد.", show_alert=True)
+            elif response.status_code == 400:
+                await query.answer("⚠️ این محصول قبلاً در سبد خرید شما ثبت شده است.", show_alert=True)
+            else:
+                await query.answer("❌ خطا در ثبت سفارش. لطفاً مجدداً تلاش کنید.", show_alert=True)
+        except httpx.RequestError:
+            await query.answer("❌ ارتباط با سرور قطع می‌باشد.", show_alert=True)
+
+
 def main():
-    """اجرای ربات به روش Polling (مناسب برای توسعه و تست)"""
+    """اجرای ربات و ثبت تمامی هندلرها به ترتیب اولویت"""
     application = Application.builder().token(TOKEN).build()
 
-    # تعریف سیستم State Machine برای گرفتن شماره و کد
     auth_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.CONTACT, handle_contact)],
         states={
@@ -129,12 +367,39 @@ def main():
         fallbacks=[CommandHandler('start', start)]
     )
 
+    support_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
+        states={
+            SUPPORT_MODE: [
+                MessageHandler(filters.ALL & ~filters.Regex('^بازگشت 🔙$'), send_to_admin)
+            ],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), exit_support)]
+    )
+
+    admin_handler = MessageHandler(
+        filters.Chat(chat_id=int(ADMIN_CHAT_ID)) & filters.REPLY, 
+        admin_reply_handler
+    )
+
     application.add_handler(CommandHandler("start", start))
+    
+    application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
+    application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
+
+    application.add_handler(CallbackQueryHandler(process_checkout, pattern='^process_checkout$'))
+    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
+    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
+    
+    # برای دکمه نمایشی صفحه فعلی که نادیده گرفته می‌شود
+    application.add_handler(CallbackQueryHandler(change_page, pattern='^ignore$'))
+
     application.add_handler(auth_conv_handler)
+    application.add_handler(support_conv_handler)
+    application.add_handler(admin_handler)
     
-    # اینجا هندلرهای مربوط به دکمه‌های منوی اصلی در آینده اضافه می‌شود
+    print("🚀 ربات با موفقیت راه‌اندازی شد و در حال گوش دادن به پیام‌هاست...")
     
-    print("ربات در حال اجراست...")
     application.run_polling()
 
 if __name__ == '__main__':

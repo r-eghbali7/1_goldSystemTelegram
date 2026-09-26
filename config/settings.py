@@ -190,6 +190,10 @@ REST_FRAMEWORK = {
     # اگر می‌خواهید همه APIها به صورت پیش‌فرض قفل باشند، این خط را اضافه کنید:
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
-    )
+    ),
+    # فعال‌سازی صفحه‌بندی پیش‌فرض برای تمام APIها
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 5,
 }
+
 
