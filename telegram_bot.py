@@ -3,8 +3,7 @@ import re
 import httpx
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence
 # لود کردن متغیرهای محیطی از فایل .env
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -406,9 +405,8 @@ async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     """اجرای ربات و ثبت تمامی هندلرها"""
     # پروکسی و سایر تنظیمات... (همان کد قبلی شما)
-    
-    application = Application.builder().token(TOKEN).build()
-
+    persistence = PicklePersistence(filepath="bot_data.pickle")
+    application = Application.builder().token(TOKEN).persistence(persistence).build()
     # دیگر نیازی به ConversationHandler برای لاگین نیست
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))

@@ -19,6 +19,7 @@ class CartAPIView(views.APIView):
         return Response(serializer.data)
 
 def post(self, request):
+        print("✅ متد POST سبد خرید با موفقیت فراخوانی شد!") # این خط اضافه شود
         product_id = request.data.get('product_id')
         product = get_object_or_404(Product, id=product_id, is_active=True)
 
