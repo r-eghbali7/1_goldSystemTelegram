@@ -4,6 +4,6 @@ from .views import CartAPIView
 app_name = 'carts'
 
 urlpatterns = [
-    # دریافت سبد خرید کاربر یا افزودن آیتم جدید با متد GET و POST
-    path('', CartAPIView.as_view(), name='cart-detail'),
+    # آدرس خالی ('') معادل همان /api/v1/carts/ است که از فایل اصلی ارجاع داده شده است
+    path('', CartAPIView.as_view(), name='cart-api'),
 ]

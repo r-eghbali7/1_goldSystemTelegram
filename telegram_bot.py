@@ -34,43 +34,71 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت شماره تماس کاربر و درخواست ارسال پیامک از جنگو"""
-    contact = update.message.contact
-    phone_number = contact.phone_number
 
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت شماره تماس و لاگین مستقیم در جنگو"""
+    contact = update.message.contact
+    
+    # 🛡️ بررسی امنیتی: جلوگیری از فوروارد کردن شماره دیگران
+    if contact.user_id != update.message.from_user.id:
+        await update.message.reply_text("❌ لطفاً فقط شماره تماس خودتان را با استفاده از دکمه کیبورد ارسال کنید.")
+        return
+
+    phone_number = contact.phone_number
+    chat_id = str(update.message.chat_id)
+    first_name = contact.first_name or ""
+    last_name = contact.last_name or ""
+
+    # نرمال‌سازی شماره موبایل
     if phone_number.startswith('+98'):
         phone_number = '0' + phone_number[3:]
     elif phone_number.startswith('98'):
         phone_number = '0' + phone_number[2:]
+    elif not phone_number.startswith('0'):
+        phone_number = '0' + phone_number
 
-    context.user_data['temp_phone'] = phone_number
+    await update.message.reply_text("⏳ در حال بررسی اطلاعات...")
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
-                f"{BASE_API_URL}/accounts/send-otp/",
-                json={"phone_number": phone_number},
-                timeout=10.0
+                f"{BASE_API_URL}/accounts/telegram-login/",
+                json={
+                    "phone_number": phone_number, 
+                    "chat_id": chat_id,
+                    "first_name": first_name,
+                    "last_name": last_name
+                },
+                timeout=15.0
             )
             
+            # 🔍 لاگ‌های ترمینال برای دیباگ کردن شما
+            print(f"--- Telegram Login Debug ---")
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Body: {response.text}")
+            print(f"----------------------------")
+            
             if response.status_code == 200:
+                data = response.json()
+                context.user_data['access_token'] = data['tokens']['access']
+                
                 await update.message.reply_text(
-                    f"کد تایید به شماره {phone_number} پیامک شد.\nلطفاً کد ۵ رقمی را ارسال کنید:",
+                    "✅ احراز هویت با موفقیت انجام شد!\nشماره شما در سیستم ثبت گردید.",
                     reply_markup=ReplyKeyboardRemove()
                 )
-                return WAITING_FOR_OTP
-            elif response.status_code == 429:
-                await update.message.reply_text("شما به تازگی درخواست کد داده‌اید. لطفاً کمی صبر کنید.")
-                return ConversationHandler.END
+                await show_main_menu(update, context)
             else:
-                error_detail = response.json().get('detail', 'خطای نامشخص')
-                await update.message.reply_text(f"خطا در ارسال کد: {error_detail}")
-                return ConversationHandler.END
-                
-        except httpx.RequestError:
-            await update.message.reply_text("ارتباط با سرور قطع شده است. لطفاً بعداً تلاش کنید.")
-            return ConversationHandler.END
+                try:
+                    error_detail = response.json().get('detail', 'خطای نامشخص')
+                except ValueError:
+                    error_detail = f"ارور سرور (کد {response.status_code})"
+                await update.message.reply_text(f"❌ خطا در ثبت‌نام: {error_detail}")
+
+        except httpx.RequestError as e:
+            print(f"Request Error: {e}")
+            await update.message.reply_text("❌ ارتباط با سرور قطع شده است. لطفاً بعداً تلاش کنید.")
+
+
 
 async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت کد وارد شده توسط کاربر و دریافت توکن JWT از جنگو"""
@@ -260,11 +288,11 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(f"{BASE_API_URL}/products/?page={page}", timeout=10.0)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 products = data.get('results', []) 
-                
+
                 if not products:
                     await context.bot.send_message(chat_id, "هیچ محصولی یافت نشد.")
                     return
@@ -273,18 +301,34 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
                     text = f"💎 **{p['title']}**\n\n"
                     text += f"📝 توضیحات: {p['description']}\n"
                     text += f"⚖️ وزن: {p['weight']} گرم\n"
-                    text += f"💰 قیمت پایه: {p['price']:,} تومان\n"
-                    
+                    price_int = int(float(p['price']))
+                    text += f"💰 قیمت پایه: {price_int:,} تومان\n"
+
                     keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p['id']}")]]
                     reply_markup = InlineKeyboardMarkup(keyboard)
 
                     image_path = p.get('image')
                     if image_path:
-                        image_url = f"{DJANGO_SERVER_URL}{image_path}"
-                        await context.bot.send_photo(chat_id=chat_id, photo=image_url, caption=text, reply_markup=reply_markup, parse_mode="Markdown")
+                        # در حالت لوکال، مسیر نسبی عکس را از آدرس استخراج کرده و فایل را باز می‌کنیم
+                        # مثال: image_path مقدارش /media/products/img.jpg است
+                        
+                        import urllib.parse
+                        # جدا کردن بخش آدرس از دامین در صورت وجود
+                        parsed_url = urllib.parse.urlparse(image_path)
+                        local_file_path = f".{parsed_url.path}" # تبدیل به ./media/products/img.jpg
+                        
+                        import os
+                        if os.path.exists(local_file_path):
+                            # ارسال فایل به صورت باینری (آپلود مستقیم از روی سرور/سیستم شما)
+                            with open(local_file_path, 'rb') as photo_file:
+                                await context.bot.send_photo(chat_id=chat_id, photo=photo_file, caption=text, reply_markup=reply_markup, parse_mode="Markdown")
+                        else:
+                            # اگر فایل به هر دلیلی روی هارد نبود، فقط متن را بفرست
+                            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
                     else:
                         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
 
+            
                 nav_buttons = []
                 if data.get('previous'):
                     nav_buttons.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"page_{page-1}"))
@@ -349,24 +393,29 @@ async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 await query.answer("✅ محصول با موفقیت به سبد خرید شما اضافه شد.", show_alert=True)
             elif response.status_code == 400:
                 await query.answer("⚠️ این محصول قبلاً در سبد خرید شما ثبت شده است.", show_alert=True)
+            elif response.status_code == 401:
+                await query.answer("❌ نشست شما منقضی شده است. لطفاً دستور /start را مجدداً ارسال کنید.", show_alert=True)
             else:
-                await query.answer("❌ خطا در ثبت سفارش. لطفاً مجدداً تلاش کنید.", show_alert=True)
+                # با این خط، دلیل اصلی خطا در ترمینال شما چاپ می‌شود
+                print(f"⚠️ Cart Error: Status {response.status_code} - Body: {response.text}")
+                await query.answer("❌ خطا در ثبت سفارش. ارتباط با سرور مشکل دارد.", show_alert=True)
         except httpx.RequestError:
             await query.answer("❌ ارتباط با سرور قطع می‌باشد.", show_alert=True)
 
 
 def main():
-    """اجرای ربات و ثبت تمامی هندلرها به ترتیب اولویت"""
+    """اجرای ربات و ثبت تمامی هندلرها"""
+    # پروکسی و سایر تنظیمات... (همان کد قبلی شما)
+    
     application = Application.builder().token(TOKEN).build()
 
-    auth_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.CONTACT, handle_contact)],
-        states={
-            WAITING_FOR_OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_otp)],
-        },
-        fallbacks=[CommandHandler('start', start)]
-    )
-
+    # دیگر نیازی به ConversationHandler برای لاگین نیست
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
+    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
+    application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
+    
     support_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
         states={
@@ -381,26 +430,19 @@ def main():
         filters.Chat(chat_id=int(ADMIN_CHAT_ID)) & filters.REPLY, 
         admin_reply_handler
     )
-
-    application.add_handler(CommandHandler("start", start))
     
+    # بقیه هندلرها دقیقاً مثل قبل اضافه شوند
     application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
     application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
-
-    application.add_handler(CallbackQueryHandler(process_checkout, pattern='^process_checkout$'))
-    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
-    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
+    # ...
     
-    # برای دکمه نمایشی صفحه فعلی که نادیده گرفته می‌شود
-    application.add_handler(CallbackQueryHandler(change_page, pattern='^ignore$'))
-
-    application.add_handler(auth_conv_handler)
     application.add_handler(support_conv_handler)
     application.add_handler(admin_handler)
     
-    print("🚀 ربات با موفقیت راه‌اندازی شد و در حال گوش دادن به پیام‌هاست...")
-    
+    print("🚀 ربات با موفقیت راه‌اندازی شد...")
     application.run_polling()
+
+
 
 if __name__ == '__main__':
     main()

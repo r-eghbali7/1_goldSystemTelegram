@@ -18,21 +18,21 @@ class CartAPIView(views.APIView):
         serializer = CartSerializer(cart)
         return Response(serializer.data)
 
-    def post(self, request):
+def post(self, request):
         product_id = request.data.get('product_id')
         product = get_object_or_404(Product, id=product_id, is_active=True)
+
+        # به جای get_or_create از این روش امن‌تر استفاده کنید تا سرور کرش نکند
+        cart = Cart.objects.filter(user=request.user, is_paid=False).order_by('-created_at').first()
         
-        cart, created = Cart.objects.get_or_create(
-            user=request.user, 
-            is_paid=False,
-            defaults={'expires_at': Cart._meta.get_field('expires_at').default()}
-        )
-        
+        if not cart:
+            cart = Cart.objects.create(user=request.user, is_paid=False)
+
         if cart.is_expired:
             cart.refresh_expiration()
 
         current_gold_price = 4500000 
-        
+
         if not cart.items.filter(product=product).exists():
             CartItem.objects.create(
                 cart=cart,
@@ -44,5 +44,5 @@ class CartAPIView(views.APIView):
             )
             cart.refresh_expiration() 
             return Response({"detail": "محصول به سبد اضافه شد."}, status=status.HTTP_201_CREATED)
-            
+
         return Response({"detail": "این محصول قبلاً در سبد شما موجود است."}, status=status.HTTP_400_BAD_REQUEST)
