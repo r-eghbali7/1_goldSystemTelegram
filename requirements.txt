@@ -37,4 +37,8 @@ tzdata==2026.4
 tzlocal==5.4.4
 urllib3==2.8.0
 vine==5.1.0
+<<<<<<< HEAD
 wcwidth==0.9.1
+=======
+wcwidth==0.9.1
+>>>>>>> 577d26a97ae73dafce2e3bbf05951191a7a996aa
