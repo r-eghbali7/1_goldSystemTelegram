@@ -7,7 +7,8 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ProductSerializer
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        store_id = self.request.headers.get('X-Store-ID')
+        queryset = Product.objects.filter(is_active=True, store_id=store_id).order_by('-created_at')        
         category_id = self.request.query_params.get('category')
         max_price = self.request.query_params.get('max_price')
         

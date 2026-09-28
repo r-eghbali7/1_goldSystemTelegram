@@ -3,12 +3,17 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from rest_framework.views import APIView
+from telegram import Update, Bot
+from telegram.ext import Application
+from stores.models import Store
 
 from products.models import Product
 from carts.models import Cart, CartItem
 from orders.models import Order, OrderItem
 from orders.services import generate_payment_link
 from .serializers import ProductSerializer, CartSerializer
+
 
 # 1. API محصولات (نمایش، صفحه‌بندی و فیلتر)
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
@@ -110,3 +115,52 @@ class CheckoutAPIView(views.APIView):
             return Response({"payment_url": result, "order_id": order.id}, status=status.HTTP_200_OK)
         else:
             return Response({"detail": result}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+# کش کردن اپلیکیشن‌های تلگرام برای سرعت بیشتر
+bot_applications = {}
+
+def get_bot_application(bot_token):
+    if bot_token not in bot_applications:
+        # ساختن نمونه اپلیکیشن برای ربات خاص
+        application = Application.builder().token(bot_token).build()
+        
+        # هندلرهای خود را اینجا اضافه کنید (مثل کد قبلی خودتان)
+        # application.add_handler(CommandHandler("start", start))
+        # application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
+        
+        bot_applications[bot_token] = application
+    return bot_applications[bot_token]
+
+
+class TelegramWebhookView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    async def post(self, request, bot_token, *args, **kwargs):
+        # ۱. پیدا کردن فروشگاه
+        try:
+            store = Store.objects.get(bot_token=bot_token, is_active=True)
+        except Store.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        # ۲. دریافت اپلیکیشن مربوط به این ربات
+        application = get_bot_application(bot_token)
+        
+        # ۳. ساخت شیء Update از ریکوئست جنگو
+        update = Update.de_json(request.data, application.bot)
+        
+        # ۴. شما باید context را جوری تنظیم کنید که هندلر بداند در کدام فروشگاه است
+        # (می‌توانید توکن یا آیدی فروشگاه را در chat_data ذخیره کنید)
+        
+        # ۵. پردازش آپدیت توسط هندلرهای شما به صورت ناهمگام (async)
+        await application.initialize()
+        await application.process_update(update)
+        
+        return Response({"status": "ok"})
+
+
+
+
+    

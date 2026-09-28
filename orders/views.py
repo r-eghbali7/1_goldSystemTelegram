@@ -20,16 +20,29 @@ class CheckoutAPIView(views.APIView):
 
     @transaction.atomic
     def post(self, request):
-        cart = Cart.objects.filter(user=request.user, is_paid=False).order_by('-created_at').first()
+        # ۱. دریافت شناسه فروشگاه از هدر درخواست
+        store_id = request.headers.get('X-Store-ID')
+        if not store_id:
+            return Response({"detail": "شناسه فروشگاه الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ۲. فیلتر کردن دقیق سبد خرید کاربر مختص همین فروشگاه
+        cart = Cart.objects.filter(
+            user=request.user, 
+            store_id=store_id, 
+            is_paid=False
+        ).order_by('-created_at').first()
         
         if not cart or cart.is_expired or cart.items.count() == 0:
-            return Response({"detail": "سبد خرید نامعتبر است."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "سبد خرید نامعتبر است یا منقضی شده."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # ۳. ساخت فاکتور نهایی و اختصاص آن به فروشگاه
         order = Order.objects.create(
             user=request.user,
+            store_id=store_id, # <--- فاکتور در دیتابیس به این فروشگاه متصل می‌شود
             total_amount=cart.total_cart_price
         )
 
+        # ۴. انتقال آیتم‌ها از Cart به Order (اسنپ‌شات قیمت)
         for item in cart.items.all():
             OrderItem.objects.create(
                 order=order,
@@ -38,9 +51,11 @@ class CheckoutAPIView(views.APIView):
                 gold_weight=item.product.weight
             )
 
+        # ۵. بستن سبد خرید
         cart.is_paid = True
         cart.save()
 
+        # ۶. ساخت لینک پرداخت داینامیک (در متد generate_payment_link از order.store مرچنت آیدی را می‌خواند)
         success, result = generate_payment_link(order.id)
         
         if success:
@@ -48,6 +63,7 @@ class CheckoutAPIView(views.APIView):
         else:
             return Response({"detail": result}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        
 def zarinpal_callback_view(request):
     # [کدهای قبلی zarinpal_callback_view را دقیقاً اینجا قرار دهید]
     authority = request.GET.get('Authority')

@@ -245,18 +245,27 @@ async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SUPPORT_MODE
 
 async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت پیام کاربر و کپی کردن آن برای ادمین"""
+    """دریافت پیام کاربر و ارسال برای ادمینِ همان فروشگاه"""
     user = update.message.from_user
     
-    await update.message.copy(chat_id=ADMIN_CHAT_ID)
+    # فرض بر این است که آبجکت store در context ذخیره شده است (در وب‌هوک)
+    store = context.bot_data.get('store')
+    admin_chat_id = store.admin_chat_id
+
+    if not admin_chat_id:
+        await update.message.reply_text("❌ متاسفانه پشتیبانی برای این فروشگاه فعال نشده است.")
+        return SUPPORT_MODE
+    
+    # فوروارد پیام برای ادمین فروشگاه
+    await update.message.copy(chat_id=admin_chat_id)
     
     await context.bot.send_message(
-        chat_id=ADMIN_CHAT_ID,
+        chat_id=admin_chat_id,
         text=f"👤 فرستنده: {user.first_name}\n💬 آیدی عددی: {user.id}\n"
              f"جهت پاسخ دادن، روی همین پیام ریپلای (Reply) کنید.",
     )
 
-    await update.message.reply_text("✅ پیام شما دریافت شد. ادمین به زودی پاسخ خواهد داد.")
+    await update.message.reply_text("✅ پیام شما دریافت شد. مدیریت فروشگاه به زودی پاسخ خواهد داد.")
     return SUPPORT_MODE
 
 async def exit_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,24 +276,32 @@ async def exit_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت پاسخ ادمین و ارسال آن برای کاربر"""
-    if str(update.message.chat_id) == str(ADMIN_CHAT_ID) and update.message.reply_to_message:
+    store = context.bot_data.get('store')
+    admin_chat_id = store.admin_chat_id
+
+    # بررسی اینکه آیا فرستنده، ادمینِ این فروشگاه است؟
+    if str(update.message.chat_id) == str(admin_chat_id) and update.message.reply_to_message:
         original_text = update.message.reply_to_message.text
         
         if original_text and "آیدی عددی:" in original_text:
+            import re
             match = re.search(r'آیدی عددی:\s*(\d+)', original_text)
             if match:
                 user_chat_id = match.group(1)
                 
                 try:
-                    await context.bot.send_message(chat_id=user_chat_id, text="🎧 پاسخ پشتیبانی:\n")
+                    await context.bot.send_message(chat_id=user_chat_id, text="🎧 پاسخ پشتیبانی گالری:\n")
                     await update.message.copy(chat_id=user_chat_id)
-                    await update.message.reply_text("پاسخ شما با موفقیت برای کاربر ارسال شد ✅")
+                    await update.message.reply_text("پاسخ شما با موفقیت برای مشتری ارسال شد ✅")
                 except Exception as e:
-                    await update.message.reply_text(f"خطا در ارسال پیام به کاربر. ممکن است ربات را بلاک کرده باشد.\nارور: {e}")
+                    await update.message.reply_text(f"خطا در ارسال پیام. ممکن است کاربر ربات را بلاک کرده باشد.\n{e}")
 
-async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE):
-    """تابع کمکی برای دریافت یک صفحه خاص از محصولات و ارسال آن‌ها به کاربر"""
+# تغییر در فایل telegram_bot.py (که حالا هندلرهای جنگو است)
+async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE, store_id: str):
+    headers = {"X-Store-ID": str(store_id)}
     async with httpx.AsyncClient() as client:
+        # ارسال آیدی فروشگاه به API
+        response = await client.get(f"{BASE_API_URL}/products/?page={page}", headers=headers)
         try:
             response = await client.get(f"{BASE_API_URL}/products/?page={page}", timeout=10.0)
 
