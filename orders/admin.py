@@ -2,21 +2,16 @@ import openpyxl
 from django.http import HttpResponse
 from django.utils import timezone
 from django.contrib import admin
+from django.db import models
 from core.admin import TenantModelAdmin
 from core.utils import to_jalali_format, to_persian_digits
-from .models import Order, OrderItem
-from django.db import models
 from core.widgets import PersianAdminDateWidget
-from .models import Order
-
+from .models import Order, OrderItem
 
 class OrderItemInline(admin.TabularInline):
     model = OrderItem
     extra = 0
-    # جلوگیری از حذف دستی آیتم‌ها از یک فاکتور ثبت شده
-    can_delete = False 
-    
-    # فیلدهای آیتم فاکتور نباید پس از نهایی شدن پرداخت تغییر کنند
+    can_delete = False  
     readonly_fields = ('product', 'get_purchased_price', 'gold_weight')
     fields = ('product', 'get_purchased_price', 'gold_weight')
 
@@ -25,31 +20,26 @@ class OrderItemInline(admin.TabularInline):
         return f"{int(obj.purchased_price):,}" if obj.pk else "-"
         
     def has_add_permission(self, request, obj=None):
-        # جلوگیری از افزودن دستی محصول به فاکتوری که قبلاً صادر شده است
         return False
 
 
 @admin.register(Order)
-class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه SaaS
+class OrderAdmin(TenantModelAdmin):
     list_display = (
         'id', 
         'user', 
         'store', 
         'status', 
-        'get_persian_total_amount', # 👈 قیمت با ارقام فارسی
-        'get_persian_created_at',   # 👈 تاریخ شمسی
+        'get_persian_total_amount', 
+        'get_persian_created_at',   
         'ref_id'
     )
     
-    # فیلتر store از TenantModelAdmin به همراه وضعیت و تاریخ اضافه می‌شود
     list_filter = TenantModelAdmin.list_filter + ('status', 'created_at')
-    
-    # جستجوی سریع روی شماره موبایل مشتری، شماره پیگیری و آیدی ربات
     search_fields = ('user__phone_number', 'ref_id', 'authority', 'id', 'store__bot_username')
-    
     inlines = [OrderItemInline]
     actions = ['export_orders_as_excel']
-    # برای جلوگیری از تقلب مالی یا خطای انسانی، تمام فیلدهای مالی و هویتی قفل می‌شوند
+    
     readonly_fields = (
         'id', 
         'user', 
@@ -62,7 +52,6 @@ class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه Saa
         'updated_at'
     )
     
-    # بهینه‌سازی کوئری دیتابیس (جلوگیری از مشکل N+1)
     list_select_related = ('user', 'store')
     
     fieldsets = (
@@ -85,13 +74,11 @@ class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه Saa
         current_time = timezone.now().strftime('%Y-%m-%d_%H-%M')
         filename = f"orders_report_{current_time}.xlsx"
 
-        # ۱. ساخت ورک‌بوک و فعال‌سازی راست‌چین
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "گزارش فاکتورها"
         ws.sheet_view.rightToLeft = True
 
-        # ۲. نوشتن هدر
         headers = [
             'شناسه سفارش (UUID)', 
             'مشتری (شماره موبایل)', 
@@ -103,12 +90,10 @@ class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه Saa
         ]
         ws.append(headers)
 
-        # بولد کردن هدر
         for col_num in range(1, len(headers) + 1):
             cell = ws.cell(row=1, column=col_num)
             cell.font = openpyxl.styles.Font(bold=True)
 
-        # ۳. درج داده‌ها
         for order in queryset:
             status_mapping = {
                 'pending': 'در انتظار پرداخت',
@@ -127,29 +112,22 @@ class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه Saa
                 order.created_at.strftime('%Y-%m-%d %H:%M')
             ])
 
-        # 👈 ۴. محاسبه و تنظیم خودکار پهنای ستون‌ها (Auto-fit)
         for col in ws.columns:
             max_length = 0
             col_letter = openpyxl.utils.get_column_letter(col[0].column)
-            
             for cell in col:
                 try:
                     if cell.value:
-                        # محاسبه طول متن داخل سلول
                         max_length = max(max_length, len(str(cell.value)))
                 except:
                     pass
-            
-            # در نظر گرفتن یک فاصله امنیتی (Padding) برای خوانایی بهتر
             adjusted_width = max(max_length + 4, 12)
             ws.column_dimensions[col_letter].width = adjusted_width
 
-        # ۵. خروجی HTTP
         response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
         wb.save(response)
         return response
 
@@ -171,6 +149,4 @@ class OrderAdmin(TenantModelAdmin): # ارث‌بری از کلاس پایه Saa
         return f"{int(obj.total_amount):,}" if obj.total_amount else "0"
         
     def has_add_permission(self, request):
-        # سفارشات فقط و فقط باید توسط سیستم (از طریق ربات و پرداخت) ایجاد شوند
-        # بنابراین دکمه "افزودن سفارش جدید" را از ادمین مخفی می‌کنیم
         return False
