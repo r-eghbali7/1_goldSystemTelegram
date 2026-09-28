@@ -13,12 +13,16 @@ Django==6.1.1
 django-filter==26.1
 djangorestframework==3.18.1
 djangorestframework_simplejwt==5.5.1
+et_xmlfile==2.0.0
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.20
+jalali_core==1.0.0
+jdatetime==6.1.0
 kavenegar==1.1.2
 kombu==5.6.2
+openpyxl==3.1.5
 packaging==26.3
 pillow==12.3.0
 prompt_toolkit==3.0.53
@@ -37,8 +41,4 @@ tzdata==2026.4
 tzlocal==5.4.4
 urllib3==2.8.0
 vine==5.1.0
-<<<<<<< HEAD
 wcwidth==0.9.1
-=======
-wcwidth==0.9.1
->>>>>>> 577d26a97ae73dafce2e3bbf05951191a7a996aa
