@@ -4,8 +4,8 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
+from core.models import TenantModel
 from products.models import Product
-from stores.models import Store
 
 User = get_user_model()
 
@@ -13,9 +13,8 @@ def get_default_cart_expiration():
     # سبد خرید به صورت پیش‌فرض ۳۰ دقیقه اعتبار دارد
     return timezone.now() + timedelta(minutes=30)
 
-class Cart(models.Model):
+class Cart(TenantModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='carts', verbose_name="فروشگاه")    
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='carts', verbose_name="کاربر")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="آخرین بروزرسانی")

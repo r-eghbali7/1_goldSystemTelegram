@@ -10,4 +10,5 @@ urlpatterns = [
     path('carts/', include('carts.urls')),
     path('orders/', include('orders.urls')),
     path('webhook/<str:bot_token>/', TelegramWebhookView.as_view(), name='telegram-webhook'),
+    path('seller/', include('seller_router.urls')),
 ]

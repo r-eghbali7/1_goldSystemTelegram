@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from core.utils import to_jalali_format, to_persian_digits
 from products.models import Product, Category
 from carts.models import Cart, CartItem
 from orders.models import Order
@@ -9,11 +10,19 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 class ProductSerializer(serializers.ModelSerializer):
-    category = CategorySerializer(read_only=True)
-    
+    price_fa = serializers.SerializerMethodField()
+    created_at_jalali = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
-        fields = ['id', 'title', 'description', 'price', 'weight', 'image', 'category', 'is_active']
+        fields = ['id', 'title', 'price', 'price_fa', 'weight', 'created_at_jalali', 'image']
+
+    def get_price_fa(self, obj):
+        return f"{to_persian_digits(obj.price)} تومان"
+
+    def get_created_at_jalali(self, obj):
+        return to_jalali_format(obj.created_at, include_time=False)
+
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)

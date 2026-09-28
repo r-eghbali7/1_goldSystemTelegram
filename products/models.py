@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.core.validators import MinValueValidator
 
+from core.models import TenantModel
 from stores.models import Store
 
 class Category(models.Model):
@@ -11,9 +12,8 @@ class Category(models.Model):
     def __str__(self):
         return self.name
 
-class Product(models.Model):
+class Product(TenantModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products') # <--- اضافه شد
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
     title = models.CharField(max_length=200, verbose_name="عنوان محصول")
     description = models.TextField(verbose_name="توضیحات")

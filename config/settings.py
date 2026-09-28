@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'orders.apps.OrdersConfig',
     'api.apps.ApiConfig',
     'stores',
+    'core',
 ]
 
 MIDDLEWARE = [
@@ -68,6 +69,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.TenantMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -195,6 +197,13 @@ REST_FRAMEWORK = {
     # فعال‌سازی صفحه‌بندی پیش‌فرض برای تمام APIها
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 5,
+    'DEFAULT_THROTTLE_RATES': {
+        # هر ربات نهایتاً می‌تواند 30 درخواست در ثانیه هندل کند
+        'bot_webhook': '30/second', 
+        
+        # هر کاربر انسانی نهایتاً می‌تواند 3 درخواست در ثانیه به یک ربات بفرستد
+        'telegram_user': '3/second',
+    }
 }
 
 

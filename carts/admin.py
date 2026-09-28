@@ -3,20 +3,100 @@ from .models import Cart, CartItem
 
 class CartItemInline(admin.TabularInline):
     model = CartItem
-    extra = 0  # جلوگیری از نمایش سطرهای خالی اضافه
+    extra = 0
+    can_delete = True
     autocomplete_fields = ('product',)
-    readonly_fields = ('raw_gold_value', 'wage_value', 'profit_value', 'tax_value', 'final_item_price')
-    fields = ('product', 'daily_gold_price', 'wage_percent', 'profit_percent', 'tax_percent', 'final_item_price')
+    
+    # فیلدهای محاسباتی باید فقط‌خواندنی باشند
+    readonly_fields = (
+        'get_raw_gold_value', 
+        'get_wage_value', 
+        'get_profit_value', 
+        'get_tax_value', 
+        'get_final_item_price'
+    )
+    
+    # ترتیب نمایش ستون‌ها در حالت Inline
+    fields = (
+        'product', 
+        'daily_gold_price', 
+        'wage_percent', 
+        'profit_percent', 
+        'tax_percent',
+        'get_raw_gold_value',
+        'get_wage_value',
+        'get_profit_value',
+        'get_tax_value',
+        'get_final_item_price'
+    )
+
+    # متدهای سفارشی برای فرمت کردن اعداد (اضافه کردن کاما) و تعیین نام ستون‌ها
+    @admin.display(description='طلای خام (تومان)')
+    def get_raw_gold_value(self, obj):
+        return f"{int(obj.raw_gold_value):,}" if obj.pk else "-"
+
+    @admin.display(description='اجرت')
+    def get_wage_value(self, obj):
+        return f"{int(obj.wage_value):,}" if obj.pk else "-"
+
+    @admin.display(description='سود')
+    def get_profit_value(self, obj):
+        return f"{int(obj.profit_value):,}" if obj.pk else "-"
+
+    @admin.display(description='مالیات')
+    def get_tax_value(self, obj):
+        return f"{int(obj.tax_value):,}" if obj.pk else "-"
+
+    @admin.display(description='قیمت نهایی')
+    def get_final_item_price(self, obj):
+        return f"{int(obj.final_item_price):,}" if obj.pk else "-"
+
 
 @admin.register(Cart)
 class CartAdmin(admin.ModelAdmin):
-    list_display = ('id', 'user', 'is_paid', 'total_cart_price', 'expires_at', 'is_expired_status', 'created_at')
-    list_filter = ('is_paid', 'created_at')
-    search_fields = ('user__phone_number', 'id')
+    # از آنجا که Cart از TenantModel ارث‌بری کرده، فیلد store نیز در دسترس است
+    list_display = (
+        'id', 
+        'user', 
+        'store', 
+        'is_paid', 
+        'get_total_price', 
+        'is_expired_status', 
+        'created_at'
+    )
+    
+    list_filter = ('is_paid', 'created_at', 'store')
+    search_fields = ('user__phone_number', 'id', 'store__bot_username')
     inlines = [CartItemInline]
-    readonly_fields = ('id', 'created_at', 'updated_at', 'total_cart_price', 'is_expired_status')
-    list_select_related = ('user',)
+    
+    readonly_fields = (
+        'id', 
+        'created_at', 
+        'updated_at', 
+        'get_total_price', 
+        'is_expired_status'
+    )
+    
+    # بهینه‌سازی کوئری‌های دیتابیس (جلوگیری از مشکل N+1 در پنل ادمین)
+    list_select_related = ('user', 'store')
 
-    @admin.display(boolean=True, description='منقضی شده')
+    # گروه‌بندی فیلدها در صفحه جزئیات سبد خرید
+    fieldsets = (
+        ('اطلاعات پایه', {
+            'fields': ('id', 'user', 'store', 'is_paid')
+        }),
+        ('وضعیت و مبالغ', {
+            'fields': ('get_total_price', 'expires_at', 'is_expired_status')
+        }),
+        ('تاریخ‌ها', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )
+
+    @admin.display(boolean=True, description='وضعیت انقضا')
     def is_expired_status(self, obj):
         return obj.is_expired
+
+    @admin.display(description='مبلغ کل سبد (تومان)')
+    def get_total_price(self, obj):
+        return f"{obj.total_cart_price:,}"

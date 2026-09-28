@@ -1,12 +1,13 @@
 import uuid
 from django.db import models
 from django.contrib.auth import get_user_model
+from core.models import TenantModel
 from products.models import Product
-from stores.models import Store
+
 
 User = get_user_model()
 
-class Order(models.Model):
+class Order(TenantModel):
     STATUS_CHOICES = (
         ('pending', 'در انتظار پرداخت'),
         ('paid', 'پرداخت شده موفق'),
@@ -15,7 +16,6 @@ class Order(models.Model):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='orders', verbose_name="خریدار")
-    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name='orders', verbose_name="فروشگاه")    
     total_amount = models.DecimalField(max_digits=15, decimal_places=0, verbose_name="مبلغ کل فاکتور (تومان)")
     
     # فیلدهای مربوط به درگاه پرداخت
