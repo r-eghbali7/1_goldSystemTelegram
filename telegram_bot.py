@@ -4,6 +4,11 @@ import httpx
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence
+import datetime
+
+
+
+
 # لود کردن متغیرهای محیطی از فایل .env
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -131,13 +136,14 @@ async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش منوی اصلی ربات پس از لاگین"""
     keyboard = [
-        [KeyboardButton("مشاهده فروشگاه 💎")],
-        [KeyboardButton("سبد خرید 🛒"), KeyboardButton("پشتیبانی 🎧")]
-    ]
+            [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نرخ زنده بازار 📈")], # 👈 دکمه اضافه شد
+            [KeyboardButton("سبد خرید 🛒"), KeyboardButton("پشتیبانی 🎧")]
+        ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     message = update.message if update.message else update.callback_query.message
     await message.reply_text("لطفاً یک گزینه را انتخاب کنید:", reply_markup=reply_markup)
+
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت اطلاعات سبد خرید از API و نمایش پیش‌فاکتور"""
@@ -170,12 +176,27 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 text = "🧾 **پیش فاکتور شما:**\n\n"
                 for idx, item in enumerate(items, 1):
+                    p_type = item.get('product_type')
                     product_title = item['product']['title']
                     final_price = item['final_price']
-                    text += f"{idx}. {product_title}\nقیمت: {final_price:,} تومان\n\n"
+                
+                text += f"*{idx}. {product_title}*\n"
+                
+                if p_type == 'ornamental':
+                    text += f"▫️ طلای خام: {int(item['raw_gold_value']):,} ت\n"
+                    text += f"▫️ اجرت: {int(item['wage']):,} ت\n"
+                    text += f"▫️ سود ({item['profit_percent']}٪): {int(item['profit_value']):,} ت\n"
+                    text += f"▫️️ مالیات ({item['tax_percent']}٪): {int(item['tax_value']):,} ت\n"
+                elif p_type == 'parsian':
+                    text += f"▫️ ارزش طلا: {int(item['raw_gold_value']):,} ت\n"
+                    text += f"▫️ سود: {int(item['profit_value']):,} ت\n"
+                    text += f"▫️ بسته‌بندی/صدور: {int(item['constant_fee']):,} ت\n"
+                    
+                text += f"✅ **قیمت نهایی:** {final_price:,} تومان\n"
+                text += "➖➖➖➖➖➖➖\n"
                 
                 text += f"💳 **مبلغ کل قابل پرداخت:** {total_price:,} تومان\n"
-                
+
                 keyboard = [
                     [InlineKeyboardButton("تسویه حساب و پرداخت 💳", callback_data="process_checkout")]
                 ]
@@ -419,6 +440,93 @@ async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.answer("❌ ارتباط با سرور قطع می‌باشد.", show_alert=True)
 
 
+
+def format_price_line(title, price, change_percent):
+    """تابع کمکی برای تولید خط متن مربوط به قیمت و درصد رشد"""
+    if change_percent > 0:
+        sign = "▲"
+    elif change_percent < 0:
+        sign = "▼"
+    else:
+        sign = "—"
+    
+    return f"🪙 {title}: {price:,} تومان ({sign} {abs(change_percent)}%)"
+
+
+async def fetch_rates_text():
+    """تابع کمکی برای دریافت اطلاعات از API و تولید متن پیام"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{BASE_API_URL}/products/rates/", timeout=5.0)
+            if response.status_code == 200:
+                data = response.json()
+                
+                # مقادیر اصلی
+                current = data.get('gold_18k', 0)
+                yesterday = data.get('yesterday_gold_18k', 0)
+                change = data.get('change_percent', 0.0)
+                ounce = data.get('ounce', 0.0)
+                mazaneh = data.get('mazaneh', 0)
+                
+                # خطوط مربوط به سکه‌ها با فرمت جدید
+                line_new = format_price_line("سکه امامی", data.get('coin_new', 0), data.get('change_coin_new', 0.0))
+                line_old = format_price_line("بهار آزادی", data.get('coin_old', 0), data.get('change_coin_old', 0.0))
+                line_half = format_price_line("نیم سکه", data.get('coin_half', 0), data.get('change_coin_half', 0.0))
+                line_quarter = format_price_line("ربع سکه", data.get('coin_quarter', 0), data.get('change_coin_quarter', 0.0))
+                line_gram = format_price_line("سکه گرمی", data.get('coin_gram', 0), data.get('change_coin_gram', 0.0))
+                
+                sign = "▲" if change > 0 else ("▼" if change < 0 else "—")
+                current_time = datetime.datetime.now().strftime('%H:%M:%S')
+                
+                text = (
+                    "📊 **نرخ لحظه‌ای بازار**\n\n"
+                    f"🌍 انس جهانی طلا: {ounce:,} دلار\n"
+                    f"⚖️ مظنه تهران: {mazaneh:,} تومان\n"
+                    f"💰 طلای ۱۸ عیار: {current:,} تومان\n"
+                    f"📈 نوسان طلا (۲۴ ساعت): {sign} {abs(change)}%\n\n"
+                    "🟡 **نرخ انواع سکه:**\n"
+                    f"{line_new}\n"
+                    f"{line_old}\n"
+                    f"{line_half}\n"
+                    f"{line_quarter}\n"
+                    f"{line_gram}\n\n"
+                    f"⏱ آخرین بروزرسانی: `{current_time}`"
+                )
+                return text
+            return "❌ دریافت نرخ‌ها موقتاً با مشکل مواجه شده است."
+        except httpx.RequestError:
+            return "❌ ارتباط با سرور قیمت‌ها قطع می‌باشد."
+
+
+async def show_live_rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر کلیک روی دکمه 'نرخ زنده بازار 📈'"""
+    text = await fetch_rates_text()
+    
+    # ساخت دکمه شیشه‌ای
+    keyboard = [[InlineKeyboardButton("بروزرسانی 🔄", callback_data="refresh_rates")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def refresh_live_rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر کلیک روی دکمه شیشه‌ای 'بروزرسانی'"""
+    query = update.callback_query
+    await query.answer("در حال دریافت قیمت‌های جدید... ⏳") # پیام پاپ‌آپ کوچک
+    
+    text = await fetch_rates_text()
+    keyboard = [[InlineKeyboardButton("بروزرسانی 🔄", callback_data="refresh_rates")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        # آپدیت کردن متن همان پیام بدون ارسال پیام جدید
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    except Exception as e:
+        # اگر کاربر دکمه را پشت سر هم بزند و متن تغییری نکرده باشد، تلگرام ارور می‌دهد که ما آن را نادیده می‌گیریم
+        if "Message is not modified" in str(e):
+            pass
+
+
+
 def main():
     """اجرای ربات و ثبت تمامی هندلرها"""
     # پروکسی و سایر تنظیمات... (همان کد قبلی شما)
@@ -430,6 +538,7 @@ def main():
     application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
     application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
     application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
+    application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
     
     support_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
@@ -447,6 +556,7 @@ def main():
     )
     
     # بقیه هندلرها دقیقاً مثل قبل اضافه شوند
+    application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
     application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
     application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
     # ...

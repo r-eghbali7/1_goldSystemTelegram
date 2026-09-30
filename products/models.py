@@ -76,3 +76,27 @@ class Product(TenantModel):
         return int(raw_gold_value)
     def __str__(self):
         return self.title
+
+
+# products/models.py
+
+class DailyGoldPrice(models.Model):
+    date = models.DateField(unique=True, verbose_name="تاریخ")
+    
+    # قیمت طلا
+    price = models.DecimalField(max_digits=12, decimal_places=0, verbose_name="قیمت پایانی طلا ۱۸ عیار")
+    
+    # قیمت‌های سکه (با مقدار پیش‌فرض صفر برای جلوگیری از خطای دیتابیس‌های قبلی)
+    coin_old_price = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="سکه طرح قدیم")
+    coin_new_price = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="سکه امامی")
+    coin_half_price = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="نیم سکه")
+    coin_quarter_price = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="ربع سکه")
+    coin_gram_price = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="سکه گرمی")
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.date}: طلا {self.price:,} | امامی {self.coin_new_price:,}"
