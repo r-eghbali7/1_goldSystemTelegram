@@ -136,20 +136,6 @@ def get_bot_application(bot_token):
     return bot_applications[bot_token]
 
 
-class TelegramWebhookView(APIView):
-    # این ویو باید پابلیک باشد تا تلگرام بتواند به آن ریکوئست بفرستد
-    permission_classes = []
-    authentication_classes = []
-
-    def post(self, request, bot_token, *args, **kwargs):
-        # ارسال دیتا به صف Celery با متد delay
-        # توجه: request.data یک دیکشنری پایتونی است که Celery می‌تواند آن را سریالایز کند
-        process_telegram_update_task.delay(bot_token, request.data)
-        
-        # پاسخ فوری به تلگرام برای جلوگیری از Timeout و ارسال مجدد پیام
-        return Response({"status": "ok"}, status=status.HTTP_200_OK)
-
-
 # کش کردن اپلیکیشن‌های تلگرام
 bot_applications = {}
 

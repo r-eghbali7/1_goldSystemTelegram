@@ -7,37 +7,29 @@ class CartItemInline(admin.TabularInline):
     can_delete = True
     autocomplete_fields = ('product',)
     
-    # فیلدهای محاسباتی باید فقط‌خواندنی باشند
     readonly_fields = (
         'get_raw_gold_value', 
-        'get_wage_value', 
         'get_profit_value', 
         'get_tax_value', 
         'get_final_item_price'
     )
     
-    # ترتیب نمایش ستون‌ها در حالت Inline
     fields = (
         'product', 
         'daily_gold_price', 
-        'wage_percent', 
+        'wage', 
         'profit_percent', 
         'tax_percent',
+        'constant_fee',
         'get_raw_gold_value',
-        'get_wage_value',
         'get_profit_value',
         'get_tax_value',
         'get_final_item_price'
     )
 
-    # متدهای سفارشی برای فرمت کردن اعداد (اضافه کردن کاما) و تعیین نام ستون‌ها
     @admin.display(description='طلای خام (تومان)')
     def get_raw_gold_value(self, obj):
         return f"{int(obj.raw_gold_value):,}" if obj.pk else "-"
-
-    @admin.display(description='اجرت')
-    def get_wage_value(self, obj):
-        return f"{int(obj.wage_value):,}" if obj.pk else "-"
 
     @admin.display(description='سود')
     def get_profit_value(self, obj):

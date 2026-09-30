@@ -26,12 +26,21 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
+    # دریافت مقادیر محاسباتی از Property های مدل
     final_price = serializers.ReadOnlyField(source='final_item_price')
+    raw_gold_value = serializers.ReadOnlyField()
+    tax_value = serializers.ReadOnlyField()
+    profit_value = serializers.ReadOnlyField()
+    product_type = serializers.ReadOnlyField()
     
     class Meta:
         model = CartItem
-        fields = ['id', 'product', 'daily_gold_price', 'wage_percent', 'tax_percent', 'final_price']
-
+        # wage_percent حذف و فیلدهای جدید اضافه شدند
+        fields = [
+            'id', 'product', 'product_type', 'daily_gold_price', 
+            'raw_gold_value', 'wage', 'profit_value', 'tax_value', 
+            'constant_fee', 'final_price'
+        ]
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
     total_price = serializers.ReadOnlyField(source='total_cart_price')
