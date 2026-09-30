@@ -173,6 +173,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'carts.tasks.cleanup_expired_carts',
         'schedule': crontab(minute='*/10'), # اجرا در هر ۱۰ دقیقه
     },
+    'fetch-gold-price-every-5-minutes': {
+        'task': 'products.tasks.fetch_live_gold_prices',
+        'schedule': 300.0, # هر 300 ثانیه (5 دقیقه)
+    },
 }
 
 

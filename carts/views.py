@@ -1,11 +1,10 @@
-# carts/views.py
+from django.core.cache import cache
 from rest_framework import status, views
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 
 from products.models import Product
-from stores.models import Store
 from .models import Cart, CartItem
 from api.serializers import CartSerializer
 
@@ -54,18 +53,30 @@ class CartAPIView(views.APIView):
         if cart.is_expired:
             cart.refresh_expiration()
 
-        current_gold_price = 4500000 
+        # 🔍 دریافت قیمت زنده از کش (تولید شده توسط تسک Celery)
+        current_gold_price = cache.get('live_gold_18k')
+        
+        # اگر قیمت در کش موجود نباشد (مثلا قطعی موقت سرور قیمت‌دهی)، اجازه ثبت خرید نمی‌دهیم
+        if not current_gold_price:
+            return Response(
+                {"detail": "سیستم در حال بروزرسانی قیمت‌های بازار است. لطفاً چند دقیقه دیگر مجدداً تلاش کنید."}, 
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
 
         if not cart.items.filter(product=product).exists():
+            # ایجاد آیتم در سبد با ثبت دقیق مقادیر در همین لحظه (Snapshot)
             CartItem.objects.create(
                 cart=cart,
                 product=product,
                 daily_gold_price=current_gold_price,
-                wage_percent=15.0, 
-                profit_percent=7.0,
-                tax_percent=9.0
+                
+                # مقادیر زیر مستقیماً از محصول در این لحظه کپی می‌شوند
+                wage=product.wage, 
+                profit_percent=product.profit_percent,
+                tax_percent=product.tax_percent,
+                constant_fee=product.constant_fee
             )
             cart.refresh_expiration() 
-            return Response({"detail": "محصول به سبد اضافه شد."}, status=status.HTTP_201_CREATED)
+            return Response({"detail": "محصول با موفقیت به سبد اضافه شد."}, status=status.HTTP_201_CREATED)
 
         return Response({"detail": "این محصول قبلاً در سبد شما موجود است."}, status=status.HTTP_400_BAD_REQUEST)

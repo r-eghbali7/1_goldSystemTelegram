@@ -5,58 +5,61 @@ from .models import Category, Product
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'id')
+    list_display = ('id', 'name')
     search_fields = ('name',)
-    # اگر تعداد دسته‌بندی‌ها زیاد است، این مورد برای پرفورمنس عالی است
-    ordering = ('name',)
 
 
 @admin.register(Product)
 class ProductAdmin(TenantModelAdmin):
-    # استفاده از متدهای کاستوم برای نمایش زیبای قیمت و عکس
+    # نمایش ستون‌های کاربردی در لیست محصولات
     list_display = (
         'title', 
-        'store', 
         'category', 
-        'get_formatted_price', 
+        'product_type_fa', 
         'weight', 
-        'is_active', 
-        'image_preview_list', 
-        'created_at'
+        'is_active'
     )
     
-    # فیلترها (اضافه شدن فیلتر فروشگاه از TenantModelAdmin)
-    list_filter = TenantModelAdmin.list_filter + ('is_active', 'category', 'created_at')
-    
-    # جستجو در نام محصول، توضیحات، نام دسته‌بندی و آیدی ربات فروشگاه
-    search_fields = ('title', 'description', 'category__name', 'store__bot_username')
-    
-    # قابلیت سرچ در دراپ‌داون‌ها (برای فرم‌های شلوغ)
-    autocomplete_fields = ('category',)
-    
-    # تغییر سریع وضعیت موجودی مستقیماً از لیست محصولات بدون ورود به صفحه ویرایش
-    list_editable = ('is_active',)
-    
-    readonly_fields = ('id', 'created_at', 'image_preview_detail')
-    
-    # بهینه‌سازی کوئری‌های دیتابیس
-    list_select_related = ('category', 'store')
+    # اضافه کردن فیلتر نوع محصول به سایدبار ادمین
+    list_filter = ('product_type', 'is_active', 'category') + TenantModelAdmin.list_filter
+    search_fields = ('title', 'description')
 
-    # دسته‌بندی فیلدها در صفحه ایجاد/ویرایش محصول
+    # گروه‌بندی منظم فیلدها در صفحه افزودن/ویرایش محصول
     fieldsets = (
         ('اطلاعات پایه', {
-            'fields': ('id', 'store', 'category', 'title', 'is_active')
+            'fields': (
+                'title', 
+                'category', 
+                'description', 
+                'image', 
+                'weight', 
+                'price', 
+                'is_active'
+            )
         }),
-        ('مشخصات و قیمت', {
-            'fields': ('price', 'weight', 'description')
+        ('تنظیمات محاسبه قیمت زنده', {
+            'fields': ('product_type', 'profit_percent'),
+            'description': 'نوع کالا را انتخاب کنید تا فیلدهای مربوط به فرمول آن نمایش داده شوند.'
         }),
-        ('تصویر محصول', {
-            'fields': ('image', 'image_preview_detail')
+        ('فرمول طلای زینتی', {
+            # کلاس ornamental-group برای کنترل توسط جاوااسکریپت
+            'classes': ('ornamental-group',),
+            'fields': ('wage', 'tax_percent'),
         }),
-        ('تاریخ‌ها', {
-            'fields': ('created_at',)
+        ('فرمول سکه پارسیان', {
+            # کلاس parsian-group برای کنترل توسط جاوااسکریپت
+            'classes': ('parsian-group',),
+            'fields': ('constant_fee',),
         }),
     )
+
+    # اتصال فایل جاوااسکریپت به این صفحه از پنل ادمین
+    class Media:
+        js = ('admin/js/product_formula_toggle.js',)
+
+    @admin.display(description='نوع محصول')
+    def product_type_fa(self, obj):
+        return obj.get_product_type_display()
 
     @admin.display(description='قیمت (تومان)', ordering='price')
     def get_formatted_price(self, obj):
