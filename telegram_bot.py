@@ -1,13 +1,11 @@
 import os
 import re
+import urllib.parse
+import datetime
 import httpx
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence
-import datetime
-
-
-
 
 # لود کردن متغیرهای محیطی از فایل .env
 load_dotenv()
@@ -18,9 +16,14 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
 BASE_API_URL = "http://127.0.0.1:8000/api/v1"
 DJANGO_SERVER_URL = "http://127.0.0.1:8000"
 
-# تعریف مراحل (States) برای ConversationHandler
+# تعریف مراحل (States) برای ConversationHandler ها
 WAITING_FOR_OTP = 1
 SUPPORT_MODE = 2
+CALC_WEIGHT, CALC_WAGE, CALC_PROFIT, CALC_TAX = range(3, 7)
+
+# کیبورد انصراف برای ماشین‌حساب
+calc_cancel_kb = ReplyKeyboardMarkup([[KeyboardButton("انصراف ❌")]], resize_keyboard=True)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور /start و درخواست شماره تماس"""
@@ -43,7 +46,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت شماره تماس و لاگین مستقیم در جنگو"""
     contact = update.message.contact
     
-    # 🛡️ بررسی امنیتی: جلوگیری از فوروارد کردن شماره دیگران
     if contact.user_id != update.message.from_user.id:
         await update.message.reply_text("❌ لطفاً فقط شماره تماس خودتان را با استفاده از دکمه کیبورد ارسال کنید.")
         return
@@ -53,7 +55,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first_name = contact.first_name or ""
     last_name = contact.last_name or ""
 
-    # نرمال‌سازی شماره موبایل
     if phone_number.startswith('+98'):
         phone_number = '0' + phone_number[3:]
     elif phone_number.startswith('98'):
@@ -76,12 +77,6 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 timeout=15.0
             )
             
-            # 🔍 لاگ‌های ترمینال برای دیباگ کردن شما
-            print(f"--- Telegram Login Debug ---")
-            print(f"Status Code: {response.status_code}")
-            print(f"Response Body: {response.text}")
-            print(f"----------------------------")
-            
             if response.status_code == 200:
                 data = response.json()
                 context.user_data['access_token'] = data['tokens']['access']
@@ -99,9 +94,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ خطا در ثبت‌نام: {error_detail}")
 
         except httpx.RequestError as e:
-            print(f"Request Error: {e}")
             await update.message.reply_text("❌ ارتباط با سرور قطع شده است. لطفاً بعداً تلاش کنید.")
-
 
 
 async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,12 +126,14 @@ async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("ارتباط با سرور قطع شده است.")
             return ConversationHandler.END
 
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش منوی اصلی ربات پس از لاگین"""
+    """نمایش منوی اصلی ربات"""
     keyboard = [
-            [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نرخ زنده بازار 📈")], # 👈 دکمه اضافه شد
-            [KeyboardButton("سبد خرید 🛒"), KeyboardButton("پشتیبانی 🎧")]
-        ]
+        [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نرخ زنده بازار 📈")],
+        [KeyboardButton("سبد خرید 🛒"), KeyboardButton("محاسبه‌گر طلا 🧮")],
+        [KeyboardButton("پشتیبانی 🎧")]
+    ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     message = update.message if update.message else update.callback_query.message
@@ -180,20 +175,20 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     product_title = item['product']['title']
                     final_price = item['final_price']
                 
-                text += f"*{idx}. {product_title}*\n"
-                
-                if p_type == 'ornamental':
-                    text += f"▫️ طلای خام: {int(item['raw_gold_value']):,} ت\n"
-                    text += f"▫️ اجرت: {int(item['wage']):,} ت\n"
-                    text += f"▫️ سود ({item['profit_percent']}٪): {int(item['profit_value']):,} ت\n"
-                    text += f"▫️️ مالیات ({item['tax_percent']}٪): {int(item['tax_value']):,} ت\n"
-                elif p_type == 'parsian':
-                    text += f"▫️ ارزش طلا: {int(item['raw_gold_value']):,} ت\n"
-                    text += f"▫️ سود: {int(item['profit_value']):,} ت\n"
-                    text += f"▫️ بسته‌بندی/صدور: {int(item['constant_fee']):,} ت\n"
+                    text += f"*{idx}. {product_title}*\n"
                     
-                text += f"✅ **قیمت نهایی:** {final_price:,} تومان\n"
-                text += "➖➖➖➖➖➖➖\n"
+                    if p_type == 'ornamental':
+                        text += f"▫️ طلای خام: {int(item.get('raw_gold_value', 0)):,} ت\n"
+                        text += f"▫️ اجرت: {int(item.get('wage', 0)):,} ت\n"
+                        text += f"▫️ سود: {int(item.get('profit_value', 0)):,} ت\n"
+                        text += f"▫ مالیات: {int(item.get('tax_value', 0)):,} ت\n"
+                    elif p_type == 'parsian':
+                        text += f"▫️ ارزش طلا: {int(item.get('raw_gold_value', 0)):,} ت\n"
+                        text += f"▫️ سود: {int(item.get('profit_value', 0)):,} ت\n"
+                        text += f"▫️ بسته‌بندی/صدور: {int(item.get('constant_fee', 0)):,} ت\n"
+                        
+                    text += f"✅ **قیمت نهایی:** {final_price:,} تومان\n"
+                    text += "➖➖➖➖➖➖➖\n"
                 
                 text += f"💳 **مبلغ کل قابل پرداخت:** {total_price:,} تومان\n"
 
@@ -208,6 +203,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
         except httpx.RequestError:
             await update.message.reply_text("خطا در ارتباط با سرور.")
+
 
 async def process_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تایید نهایی سبد، ساخت سفارش در جنگو و دریافت لینک زرین‌پال"""
@@ -252,8 +248,9 @@ async def process_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except httpx.RequestError:
             await query.edit_message_text("خطا در برقراری ارتباط با سرور بانکی.")
 
+
 async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ورود به بخش پشتیبانی و تغییر کیبورد"""
+    """ورود به بخش پشتیبانی"""
     keyboard = [[KeyboardButton("بازگشت 🔙")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -265,19 +262,18 @@ async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return SUPPORT_MODE
 
+
 async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دریافت پیام کاربر و ارسال برای ادمینِ همان فروشگاه"""
+    """دریافت پیام کاربر و ارسال برای ادمین فروشگاه"""
     user = update.message.from_user
-    
-    # فرض بر این است که آبجکت store در context ذخیره شده است (در وب‌هوک)
     store = context.bot_data.get('store')
-    admin_chat_id = store.admin_chat_id
+    
+    admin_chat_id = store.admin_chat_id if store else ADMIN_CHAT_ID
 
     if not admin_chat_id:
         await update.message.reply_text("❌ متاسفانه پشتیبانی برای این فروشگاه فعال نشده است.")
         return SUPPORT_MODE
     
-    # فوروارد پیام برای ادمین فروشگاه
     await update.message.copy(chat_id=admin_chat_id)
     
     await context.bot.send_message(
@@ -289,27 +285,26 @@ async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ پیام شما دریافت شد. مدیریت فروشگاه به زودی پاسخ خواهد داد.")
     return SUPPORT_MODE
 
+
 async def exit_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """خروج از پشتیبانی و بازگشت به منوی اصلی"""
+    """خروج از پشتیبانی"""
     await update.message.reply_text("شما از بخش پشتیبانی خارج شدید.")
     await show_main_menu(update, context) 
     return ConversationHandler.END
 
+
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت پاسخ ادمین و ارسال آن برای کاربر"""
     store = context.bot_data.get('store')
-    admin_chat_id = store.admin_chat_id
+    admin_chat_id = store.admin_chat_id if store else ADMIN_CHAT_ID
 
-    # بررسی اینکه آیا فرستنده، ادمینِ این فروشگاه است؟
     if str(update.message.chat_id) == str(admin_chat_id) and update.message.reply_to_message:
         original_text = update.message.reply_to_message.text
         
         if original_text and "آیدی عددی:" in original_text:
-            import re
             match = re.search(r'آیدی عددی:\s*(\d+)', original_text)
             if match:
                 user_chat_id = match.group(1)
-                
                 try:
                     await context.bot.send_message(chat_id=user_chat_id, text="🎧 پاسخ پشتیبانی گالری:\n")
                     await update.message.copy(chat_id=user_chat_id)
@@ -317,14 +312,19 @@ async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except Exception as e:
                     await update.message.reply_text(f"خطا در ارسال پیام. ممکن است کاربر ربات را بلاک کرده باشد.\n{e}")
 
-# تغییر در فایل telegram_bot.py (که حالا هندلرهای جنگو است)
-async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE, store_id: str):
-    headers = {"X-Store-ID": str(store_id)}
+
+async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE, store_id: str = None):
+    headers = {}
+    if store_id:
+        headers["X-Store-ID"] = str(store_id)
+        
+    access_token = context.user_data.get('access_token')
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+
     async with httpx.AsyncClient() as client:
-        # ارسال آیدی فروشگاه به API
-        response = await client.get(f"{BASE_API_URL}/products/?page={page}", headers=headers)
         try:
-            response = await client.get(f"{BASE_API_URL}/products/?page={page}", timeout=10.0)
+            response = await client.get(f"{BASE_API_URL}/products/?page={page}", headers=headers, timeout=10.0)
 
             if response.status_code == 200:
                 data = response.json()
@@ -346,21 +346,13 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
 
                     image_path = p.get('image')
                     if image_path:
-                        # در حالت لوکال، مسیر نسبی عکس را از آدرس استخراج کرده و فایل را باز می‌کنیم
-                        # مثال: image_path مقدارش /media/products/img.jpg است
-                        
-                        import urllib.parse
-                        # جدا کردن بخش آدرس از دامین در صورت وجود
                         parsed_url = urllib.parse.urlparse(image_path)
-                        local_file_path = f".{parsed_url.path}" # تبدیل به ./media/products/img.jpg
+                        local_file_path = f".{parsed_url.path}"
                         
-                        import os
                         if os.path.exists(local_file_path):
-                            # ارسال فایل به صورت باینری (آپلود مستقیم از روی سرور/سیستم شما)
                             with open(local_file_path, 'rb') as photo_file:
                                 await context.bot.send_photo(chat_id=chat_id, photo=photo_file, caption=text, reply_markup=reply_markup, parse_mode="Markdown")
                         else:
-                            # اگر فایل به هر دلیلی روی هارد نبود، فقط متن را بفرست
                             await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
                     else:
                         await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
@@ -386,13 +378,15 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
         except httpx.RequestError:
             await context.bot.send_message(chat_id, "ارتباط با سرور قطع است.")
 
+
 async def view_shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندلر کلیک روی دکمه 'مشاهده فروشگاه' از کیبورد اصلی"""
+    """هندلر کلیک روی دکمه 'مشاهده فروشگاه'"""
     await update.message.reply_text("⏳ در حال دریافت جدیدترین کارهای گالری...")
     await fetch_and_send_products(update.message.chat_id, 1, context)
 
+
 async def change_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندلر کلیک روی دکمه‌های صفحه‌بندی (Next/Prev)"""
+    """هندلر کلیک روی دکمه‌های صفحه‌بندی"""
     query = update.callback_query
     await query.answer()
     
@@ -400,15 +394,14 @@ async def change_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     page_number = int(query.data.split('_')[1])
-    
     await query.edit_message_text(f"⏳ در حال بارگذاری صفحه {page_number}...")
     await fetch_and_send_products(query.message.chat_id, page_number, context)
     await query.message.delete()
 
+
 async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندلر کلیک روی دکمه 'افزودن به سبد خرید' محصولات"""
+    """افزودن به سبد خرید محصولات"""
     query = update.callback_query
-    
     product_id = query.data.replace('add_cart_', '').strip()
     
     access_token = context.user_data.get('access_token')
@@ -433,12 +426,10 @@ async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             elif response.status_code == 401:
                 await query.answer("❌ نشست شما منقضی شده است. لطفاً دستور /start را مجدداً ارسال کنید.", show_alert=True)
             else:
-                # با این خط، دلیل اصلی خطا در ترمینال شما چاپ می‌شود
                 print(f"⚠️ Cart Error: Status {response.status_code} - Body: {response.text}")
                 await query.answer("❌ خطا در ثبت سفارش. ارتباط با سرور مشکل دارد.", show_alert=True)
         except httpx.RequestError:
             await query.answer("❌ ارتباط با سرور قطع می‌باشد.", show_alert=True)
-
 
 
 def format_price_line(title, price, change_percent):
@@ -454,21 +445,19 @@ def format_price_line(title, price, change_percent):
 
 
 async def fetch_rates_text():
-    """تابع کمکی برای دریافت اطلاعات از API و تولید متن پیام"""
+    """دریافت اطلاعات از API و تولید متن پیام نرخ‌ها"""
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(f"{BASE_API_URL}/products/rates/", timeout=5.0)
             if response.status_code == 200:
                 data = response.json()
                 
-                # مقادیر اصلی
                 current = data.get('gold_18k', 0)
                 yesterday = data.get('yesterday_gold_18k', 0)
                 change = data.get('change_percent', 0.0)
                 ounce = data.get('ounce', 0.0)
                 mazaneh = data.get('mazaneh', 0)
                 
-                # خطوط مربوط به سکه‌ها با فرمت جدید
                 line_new = format_price_line("سکه امامی", data.get('coin_new', 0), data.get('change_coin_new', 0.0))
                 line_old = format_price_line("بهار آزادی", data.get('coin_old', 0), data.get('change_coin_old', 0.0))
                 line_half = format_price_line("نیم سکه", data.get('coin_half', 0), data.get('change_coin_half', 0.0))
@@ -499,47 +488,167 @@ async def fetch_rates_text():
 
 
 async def show_live_rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندلر کلیک روی دکمه 'نرخ زنده بازار 📈'"""
+    """نمایش نرخ زنده بازار"""
     text = await fetch_rates_text()
-    
-    # ساخت دکمه شیشه‌ای
     keyboard = [[InlineKeyboardButton("بروزرسانی 🔄", callback_data="refresh_rates")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
+
 async def refresh_live_rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندلر کلیک روی دکمه شیشه‌ای 'بروزرسانی'"""
+    """بروزرسانی پیام نرخ زنده"""
     query = update.callback_query
-    await query.answer("در حال دریافت قیمت‌های جدید... ⏳") # پیام پاپ‌آپ کوچک
+    await query.answer("در حال دریافت قیمت‌های جدید... ⏳")
     
     text = await fetch_rates_text()
     keyboard = [[InlineKeyboardButton("بروزرسانی 🔄", callback_data="refresh_rates")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        # آپدیت کردن متن همان پیام بدون ارسال پیام جدید
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
     except Exception as e:
-        # اگر کاربر دکمه را پشت سر هم بزند و متن تغییری نکرده باشد، تلگرام ارور می‌دهد که ما آن را نادیده می‌گیریم
         if "Message is not modified" in str(e):
             pass
 
 
+async def start_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """شروع ماشین‌حساب و دریافت وزن"""
+    await update.message.reply_text(
+        "🧮 **به محاسبه‌گر آنلاین طلا خوش آمدید!**\n\n"
+        "لطفاً **وزن طلا** را به گرم وارد کنید (مثلاً 2.5):",
+        reply_markup=calc_cancel_kb,
+        parse_mode="Markdown"
+    )
+    return CALC_WEIGHT
+
+
+async def calc_get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت وزن در ماشین‌حساب"""
+    text = update.message.text
+    if text == "انصراف ❌":
+        await update.message.reply_text("عملیات لغو شد.")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+        
+    try:
+        context.user_data['calc_weight'] = float(text)
+        await update.message.reply_text("✅ وزن ثبت شد.\n\nحالا **مبلغ کل اجرت** را به تومان وارد کنید (مثلاً 500000):")
+        return CALC_WAGE
+    except ValueError:
+        await update.message.reply_text("❌ لطفاً فقط یک عدد معتبر برای وزن وارد کنید:")
+        return CALC_WEIGHT
+
+
+async def calc_get_wage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت اجرت در ماشین‌حساب"""
+    text = update.message.text
+    if text == "انصراف ❌":
+        await update.message.reply_text("عملیات لغو شد.")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+        
+    try:
+        context.user_data['calc_wage'] = float(text)
+        await update.message.reply_text("✅ اجرت ثبت شد.\n\nحالا **درصد سود فروشنده** را وارد کنید (مثلاً 7):")
+        return CALC_PROFIT
+    except ValueError:
+        await update.message.reply_text("❌ لطفاً فقط یک عدد معتبر برای اجرت وارد کنید:")
+        return CALC_WAGE
+
+
+async def calc_get_profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت سود در ماشین‌حساب"""
+    text = update.message.text
+    if text == "انصراف ❌":
+        await update.message.reply_text("عملیات لغو شد.")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+        
+    try:
+        context.user_data['calc_profit'] = float(text)
+        await update.message.reply_text("✅ درصد سود ثبت شد.\n\nدر مرحله آخر، **درصد مالیات** را وارد کنید (مثلاً 10):")
+        return CALC_TAX
+    except ValueError:
+        await update.message.reply_text("❌ لطفاً فقط عدد وارد کنید:")
+        return CALC_PROFIT
+
+
+async def calc_get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت مالیات و تولید فاکتور ماشین‌حساب"""
+    text = update.message.text
+    if text == "انصراف ❌":
+        await update.message.reply_text("عملیات لغو شد.")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+        
+    try:
+        tax_percent = float(text)
+        weight = context.user_data['calc_weight']
+        wage = context.user_data['calc_wage']
+        profit_percent = context.user_data['calc_profit']
+
+        await update.message.reply_text("⏳ در حال دریافت قیمت زنده و محاسبه فاکتور...")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BASE_API_URL}/products/rates/", timeout=5.0)
+            data = response.json()
+            live_18k_price = data.get('gold_18k', 0)
+
+        if live_18k_price == 0:
+            await update.message.reply_text("❌ دریافت قیمت لحظه‌ای با مشکل مواجه شد. لطفاً بعداً تلاش کنید.")
+            await show_main_menu(update, context)
+            return ConversationHandler.END
+
+        raw_gold_value = weight * live_18k_price
+        tax_amount = raw_gold_value * (tax_percent / 100)
+        profit_amount = raw_gold_value * (profit_percent / 100)
+        
+        A = raw_gold_value + wage + tax_amount + profit_amount
+        B = raw_gold_value * 0.09
+        final_price = int(A - B)
+
+        result_text = (
+            "🧾 **نتیجه محاسبه آنلاین شما:**\n\n"
+            f"⚖️ وزن وارد شده: {weight} گرم\n"
+            f"💰 قیمت لحظه‌ای طلا: {live_18k_price:,} تومان\n"
+            f"▫️ ارزش طلای خام: {int(raw_gold_value):,} تومان\n"
+            f"▫️ اجرت ساخت: {int(wage):,} تومان\n"
+            f"▫️ سود فروشنده ({profit_percent}٪): {int(profit_amount):,} تومان\n"
+            f"▫️ مالیات ({tax_percent}٪): {int(tax_amount):,} تومان\n"
+            "➖➖➖➖➖➖➖\n"
+            f"✅ **مبلغ نهایی تقریبی: {final_price:,} تومان**"
+        )
+
+        await update.message.reply_text(result_text, parse_mode="Markdown")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+
+    except ValueError:
+        await update.message.reply_text("❌ لطفاً فقط عدد وارد کنید:")
+        return CALC_TAX
+
 
 def main():
     """اجرای ربات و ثبت تمامی هندلرها"""
-    # پروکسی و سایر تنظیمات... (همان کد قبلی شما)
-    persistence = PicklePersistence(filepath="bot_data.pickle")
-    application = Application.builder().token(TOKEN).persistence(persistence).build()
-    # دیگر نیازی به ConversationHandler برای لاگین نیست
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
-    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
-    application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
-    application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
     
+    # ۱. پیکربندی پایگاه ذخیره‌سازی نشست‌ها
+    persistence = PicklePersistence(filepath="bot_data.pickle")
+    
+    # ۲. بیلد کردن اپلیکیشن ربات (این کار باید پیش از تعریف هندلرها انجام شود)
+    application = Application.builder().token(TOKEN).persistence(persistence).build()
+
+    # ۳. تعریف هندلرهای مکالمه‌محور (ConversationHandlers)
+    calculator_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^محاسبه‌گر طلا 🧮$'), start_calculator)],
+        states={
+            CALC_WEIGHT: [MessageHandler(filters.TEXT, calc_get_weight)],
+            CALC_WAGE: [MessageHandler(filters.TEXT, calc_get_wage)],
+            CALC_PROFIT: [MessageHandler(filters.TEXT, calc_get_profit)],
+            CALC_TAX: [MessageHandler(filters.TEXT, calc_get_tax)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^انصراف ❌$'), calc_get_weight)]
+    )
+
     support_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
         states={
@@ -551,22 +660,30 @@ def main():
     )
 
     admin_handler = MessageHandler(
-        filters.Chat(chat_id=int(ADMIN_CHAT_ID)) & filters.REPLY, 
+        filters.Chat(chat_id=int(ADMIN_CHAT_ID)) & filters.REPLY if ADMIN_CHAT_ID else filters.REPLY, 
         admin_reply_handler
     )
+
+    # ۴. اضافه کردن تمام هندلرها به اپلیکیشن
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     
-    # بقیه هندلرها دقیقاً مثل قبل اضافه شوند
+    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
+    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
+    application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
+    application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
+    
     application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
     application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
     application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
-    # ...
     
+    application.add_handler(calculator_conv_handler)
     application.add_handler(support_conv_handler)
     application.add_handler(admin_handler)
     
+    # ۵. اجرای ربات
     print("🚀 ربات با موفقیت راه‌اندازی شد...")
     application.run_polling()
-
 
 
 if __name__ == '__main__':
