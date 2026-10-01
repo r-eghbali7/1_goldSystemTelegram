@@ -124,18 +124,18 @@ class CheckoutAPIView(views.APIView):
             return Response({"detail": result}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-# کش کردن اپلیکیشن‌های تلگرام برای سرعت بیشتر
 bot_applications = {}
-
+# کش کردن اپلیکیشن‌های تلگرام برای سرعت بیشتر
 def get_bot_application(bot_token):
     if bot_token not in bot_applications:
+        # جستجو در هر دو ستون برای پیدا کردن فروشگاه
         store = Store.objects.get(
             Q(telegram_bot_token=bot_token) | Q(bale_bot_token=bot_token), 
             is_active=True
         )
         
         platform = 'telegram' if store.telegram_bot_token == bot_token else 'bale'
+        
         persistence = RedisTenantPersistence(store_id=store.id)
         builder = Application.builder().token(bot_token).persistence(persistence)
         
@@ -144,46 +144,10 @@ def get_bot_application(bot_token):
             
         application = builder.build()
         
-        # 👇 ثبت هندلرهای مکالمه‌محور
-        calculator_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex('^محاسبه‌گر طلا 🧮$'), start_calculator)],
-            states={
-                CALC_WEIGHT: [MessageHandler(filters.TEXT, calc_get_weight)],
-                CALC_WAGE: [MessageHandler(filters.TEXT, calc_get_wage)],
-                CALC_PROFIT: [MessageHandler(filters.TEXT, calc_get_profit)],
-                CALC_TAX: [MessageHandler(filters.TEXT, calc_get_tax)],
-            },
-            fallbacks=[MessageHandler(filters.Regex('^انصراف ❌$'), calc_get_weight)]
-        )
-
-        support_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
-            states={
-                SUPPORT_MODE: [MessageHandler(filters.ALL & ~filters.Regex('^بازگشت 🔙$'), send_to_admin)],
-            },
-            fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), exit_support)]
-        )
-
-        admin_handler = MessageHandler(
-            filters.Chat(chat_id=int(ADMIN_CHAT_ID)) & filters.REPLY if ADMIN_CHAT_ID else filters.REPLY, 
-            admin_reply_handler
-        )
-
-        # 👇 ثبت هندلرهای ساده
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-        application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
-        application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
-        application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
-        application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
-        application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
-        application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
-        application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
+        # (ثبت هندلرها که در مرحله قبل انجام دادیم باید اینجا بماند)
+        from api.bot_handlers import start, add_to_cart_callback # و غیره...
+        # application.add_handler(...)
         
-        application.add_handler(calculator_conv_handler)
-        application.add_handler(support_conv_handler)
-        application.add_handler(admin_handler)
-
         bot_applications[bot_token] = application
         
     return bot_applications[bot_token]
@@ -192,16 +156,9 @@ def get_bot_application(bot_token):
 class TelegramWebhookView(APIView):
     permission_classes = []
     authentication_classes = []
-    
-    # 👈 اعمال محدودیت‌ها روی این ویو
     throttle_classes = [BotTokenThrottle, TelegramUserThrottle] 
 
     def post(self, request, bot_token, *args, **kwargs):
-        # این کد فقط زمانی اجرا می‌شود که درخواست‌ها از سقف Throttling عبور نکرده باشند
+        # ارسال آپدیت به صف Celery برای پردازش
         process_telegram_update_task.delay(bot_token, request.data)
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
-
-
-
-
-
