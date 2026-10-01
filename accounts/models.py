@@ -39,6 +39,8 @@ class User(AbstractUser):
     username = None
     phone_number = models.CharField(validators=[phone_regex], max_length=11, unique=True, verbose_name="شماره موبایل")
     chat_id = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="آیدی تلگرام")
+    telegram_chat_id = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="آیدی تلگرام")
+    bale_chat_id = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="آیدی بله")
     is_verified = models.BooleanField(default=False, verbose_name="احراز هویت شده")
 
     USERNAME_FIELD = 'phone_number'

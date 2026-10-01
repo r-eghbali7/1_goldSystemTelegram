@@ -34,7 +34,6 @@ class StoreCustomer(models.Model):
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='customers', verbose_name="فروشگاه")
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='store_profiles', verbose_name="مشتری")
     joined_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ عضویت در ربات")
-    
     # فیلدهای اختصاصی کاربر در این فروشگاه خاص (اختیاری)
     total_spent = models.DecimalField(max_digits=15, decimal_places=0, default=0, verbose_name="مجموع خرید از این فروشگاه")
     is_blocked = models.BooleanField(default=False, verbose_name="بلاک شده توسط این فروشگاه")
@@ -44,4 +43,5 @@ class StoreCustomer(models.Model):
         unique_together = ('store', 'user') 
 
     def __str__(self):
-        return f"{self.user.phone_number} در {self.store.bot_username}"
+        store_name = self.store.telegram_bot_username or self.store.bale_bot_username or "گالری"
+        return f"{self.user.phone_number} در {store_name}"

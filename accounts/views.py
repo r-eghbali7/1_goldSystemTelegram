@@ -15,6 +15,8 @@ class TelegramDirectLoginView(APIView):
 
     def post(self, request):
         phone_number = request.data.get('phone_number')
+        telegram_chat_id = request.data.get('telegram_chat_id')
+        bale_chat_id = request.data.get('bale_chat_id')
         chat_id = request.data.get('chat_id')
         store_id = request.data.get('store_id')
         first_name = request.data.get('first_name', '')
@@ -24,16 +26,15 @@ class TelegramDirectLoginView(APIView):
             return Response({"detail": "شماره موبایل الزامی است."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # ۱. جستجو یا ساخت امن کاربر در دیتابیس مرکزی (هویت یکپارچه)
             user, created = User.objects.get_or_create(phone_number=phone_number)
             
-            # آپدیت کردن اطلاعات شخصی کاربر
-            if chat_id:
-                user.chat_id = chat_id
-            if first_name:
-                user.first_name = first_name
-            if last_name:
-                user.last_name = last_name
+            if telegram_chat_id:
+                user.telegram_chat_id = telegram_chat_id
+            if bale_chat_id:
+                user.bale_chat_id = bale_chat_id
+                
+            if first_name: user.first_name = first_name
+            if last_name: user.last_name = last_name
                 
             user.is_verified = True
             user.save()

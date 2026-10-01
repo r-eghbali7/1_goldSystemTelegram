@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     # پکیج‌های شخص ثالث
     'rest_framework',
     'rest_framework_simplejwt',
+    "corsheaders",
     
     # اپلیکیشن‌های پروژه
     'accounts.apps.AccountsConfig',
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -138,7 +140,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
-STATICFILS_DIRS = BASE_DIR / 'static'
+# پوشه‌هایی که خودتان فایل استاتیک (مثل CSS یا JS سفارشی) در آن‌ها قرار می‌دهید
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',
+]
+# پوشه مقصد برای جمع‌آوری تمام فایل‌های استاتیک پروژه و ادمین (مورد نیاز برای collectstatic)
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -210,4 +217,9 @@ REST_FRAMEWORK = {
     }
 }
 
+# CSRF_TRUSTED_ORIGINS = [
+#     'https://tough-times-occur.loca.lt',
+#     'https://*.loca.lt',  # این خط باعث می‌شود اگر آدرس تونل تغییر کرد هم سیستم کار کند
+# ]
 
+# CORS_ALLOW_ALL_ORIGINS = True

@@ -13,9 +13,8 @@ def send_telegram_receipt(self, order_id):
 
     store = order.store
     
-    buyer_text = f"✅ پرداخت شما در {store.bot_username or 'گالری'} با موفقیت تایید شد!\nشماره سفارش: {order.id}\nمبلغ پرداختی: {order.total_amount:,} تومان\nکد پیگیری تراکنش: {order.ref_id}"
     admin_text = f"💰 یک سفارش جدید در فروشگاه شما با موفقیت ثبت و پرداخت شد!\nشماره مشتری: {order.user.phone_number}\nمبلغ: {order.total_amount:,} تومان\nکد پیگیری زرین‌پال: {order.ref_id}"
-
+    
     # تابع کمکی برای تلاش ارسال روی هر دو پیام‌رسان
     async def send_via_bot(token, base_url, chat_id, text):
         if not token or not chat_id:
@@ -36,6 +35,7 @@ def send_telegram_receipt(self, order_id):
         
         if store.telegram_bot_token:
             bots.append({
+                'platform': 'telegram',
                 'token': store.telegram_bot_token,
                 'url': "https://api.telegram.org/bot",
                 'admin_chat_id': store.admin_chat_id_telegram,
@@ -44,20 +44,28 @@ def send_telegram_receipt(self, order_id):
             
         if store.bale_bot_token:
             bots.append({
+                'platform': 'bale',
                 'token': store.bale_bot_token,
                 'url': "https://tapi.bale.ai/bot",
                 'admin_chat_id': store.admin_chat_id_bale,
                 'bot_name': store.bale_bot_username or 'گالری'
             })
 
-        # ارسال برای خریدار
+        # ارسال رسید برای خریدار
         buyer_sent = False
         for bot_info in bots:
             if buyer_sent: break
-            # داینامیک کردن نام ربات در متن مشتری
-            buyer_text = f"✅ پرداخت شما در {bot_info['bot_name']} با موفقیت تایید شد!..."
             
-            success, is_net_err = await send_via_bot(bot_info['token'], bot_info['url'], order.user.chat_id, buyer_text)
+            # 👈 استخراج چت آیدی کاربر در همین پلتفرم خاص
+            user_chat_id = order.user.telegram_chat_id if bot_info['platform'] == 'telegram' else order.user.bale_chat_id
+            
+            # اگر کاربر در این پلتفرم ثبت نام نکرده بود، رد شو
+            if not user_chat_id:
+                continue
+
+            buyer_text = f"✅ پرداخت شما در {bot_info['bot_name']} با موفقیت تایید شد!\nشماره سفارش: {order.id}\nمبلغ پرداختی: {order.total_amount:,} تومان\nکد پیگیری تراکنش: {order.ref_id}"
+            
+            success, is_net_err = await send_via_bot(bot_info['token'], bot_info['url'], user_chat_id, buyer_text)
             if success: buyer_sent = True
             if is_net_err: network_failure = True
 

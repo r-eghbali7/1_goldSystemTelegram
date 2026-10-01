@@ -9,7 +9,8 @@ from .models import User
 class CustomUserChangeForm(UserChangeForm):
     class Meta:
         model = User
-        fields = ('phone_number', 'email', 'first_name', 'last_name', 'chat_id')
+        fields = ('phone_number', 'email', 'first_name', 'last_name', 'telegram_chat_id', 'bale_chat_id')
+
 
 # ۲. فرم اختصاصی برای ساخت کاربر جدید در پنل ادمین
 class CustomUserCreationForm(UserCreationForm):
@@ -45,7 +46,7 @@ class CustomUserAdmin(UserAdmin):
     )
     
     # فیلدهای قابل جستجو (بسیار مهم برای پیدا کردن سریع مشتریان)
-    search_fields = ('phone_number', 'chat_id', 'first_name', 'last_name')
+    search_fields = ('phone_number', 'telegram_chat_id', 'bale_chat_id', 'first_name', 'last_name')    
     
     # مرتب‌سازی پیش‌فرض (جدیدترین کاربران در ابتدا)
     ordering = ('-date_joined',)
@@ -56,7 +57,7 @@ class CustomUserAdmin(UserAdmin):
     # گروه‌بندی حرفه‌ای فیلدها در صفحه ویرایش جزئیات کاربر
     fieldsets = (
         (_('اطلاعات ورود'), {'fields': ('phone_number', 'password')}),
-        (_('اطلاعات شخصی'), {'fields': ('first_name', 'last_name', 'email', 'chat_id')}),
+        (_('اطلاعات شخصی'), {'fields': ('first_name', 'last_name', 'email', 'telegram_chat_id', 'bale_chat_id')}),
         (_('دسترسی‌ها و وضعیت'), {
             'fields': (
                 'is_verified', 

@@ -57,18 +57,20 @@ class StoreAdmin(admin.ModelAdmin):
                 continue
                 
             try:
-                # فراخوانی صحیح سرویس با یک آرگومان (ارسال خودِ شیء store)
                 results = setup_store_webhooks(store)                
                 for res in results:
                     self.message_user(request, res, level=messages.SUCCESS)
                 success_count += 1
             except Exception as e:
+                # ✅ اصلاح متغیر نام ربات با فیلدهای جدید
+                store_name = store.telegram_bot_username or store.bale_bot_username or store.id
+                
                 self.message_user(
                     request, 
-                    f"خطای ارتباط با سرور برای ربات {store.bot_username or store.id}: {str(e)}", 
+                    f"خطای ارتباط با سرور برای ربات {store_name}: {str(e)}", 
                     level=messages.ERROR
                 )
-
+                
 @admin.register(StoreCustomer)
 class StoreCustomerAdmin(admin.ModelAdmin):
     list_display = ('user', 'store', 'get_formatted_total_spent', 'is_blocked', 'joined_at')

@@ -124,9 +124,6 @@ class CheckoutAPIView(views.APIView):
             return Response({"detail": result}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# api/views.py
-bot_applications = {}
-
 bot_applications = {}
 
 def get_bot_application(store, bot_token):

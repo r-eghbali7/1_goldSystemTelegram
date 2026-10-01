@@ -28,4 +28,4 @@ def process_telegram_update_task(bot_token, update_data):
         await application.process_update(update)
 
     asyncio.run(run_bot_update())
-    return f"Update for store {store.bot_username} processed."
+    return f"Update for store {store.telegram_bot_username or store.bale_bot_username} processed."
