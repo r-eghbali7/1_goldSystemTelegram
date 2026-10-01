@@ -29,33 +29,49 @@ def send_telegram_receipt(self, order_id):
         except TelegramError:
             return False, False # آیدی برای این پیام‌رسان نیست
 
+
     async def send_messages():
         network_failure = False
-        
-        # لیست ربات‌های فعال فروشگاه
         bots = []
+        
         if store.telegram_bot_token:
-            bots.append((store.telegram_bot_token, "https://api.telegram.org/bot"))
+            bots.append({
+                'token': store.telegram_bot_token,
+                'url': "https://api.telegram.org/bot",
+                'admin_chat_id': store.admin_chat_id_telegram,
+                'bot_name': store.telegram_bot_username or 'گالری'
+            })
+            
         if store.bale_bot_token:
-            bots.append((store.bale_bot_token, "https://tapi.bale.ai/bot"))
+            bots.append({
+                'token': store.bale_bot_token,
+                'url': "https://tapi.bale.ai/bot",
+                'admin_chat_id': store.admin_chat_id_bale,
+                'bot_name': store.bale_bot_username or 'گالری'
+            })
 
-        # ارسال رسید برای خریدار (هوشمندانه روی پیام‌رسان درست)
+        # ارسال برای خریدار
         buyer_sent = False
-        for token, url in bots:
+        for bot_info in bots:
             if buyer_sent: break
-            success, is_net_err = await send_via_bot(token, url, order.user.chat_id, buyer_text)
+            # داینامیک کردن نام ربات در متن مشتری
+            buyer_text = f"✅ پرداخت شما در {bot_info['bot_name']} با موفقیت تایید شد!..."
+            
+            success, is_net_err = await send_via_bot(bot_info['token'], bot_info['url'], order.user.chat_id, buyer_text)
             if success: buyer_sent = True
             if is_net_err: network_failure = True
 
-        # ارسال رسید برای ادمین
+        # ارسال برای ادمین
         admin_sent = False
-        for token, url in bots:
+        for bot_info in bots:
             if admin_sent: break
-            success, is_net_err = await send_via_bot(token, url, store.admin_chat_id, admin_text)
+            # استفاده از چت آیدی مختص همان پلتفرم
+            success, is_net_err = await send_via_bot(bot_info['token'], bot_info['url'], bot_info['admin_chat_id'], admin_text)
             if success: admin_sent = True
             if is_net_err: network_failure = True
 
         return network_failure
+
 
     has_network_errors = asyncio.run(send_messages())
     

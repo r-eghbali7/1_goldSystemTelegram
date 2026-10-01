@@ -127,21 +127,20 @@ class CheckoutAPIView(views.APIView):
 # api/views.py
 bot_applications = {}
 
-def get_bot_application(store):
+bot_applications = {}
+
+def get_bot_application(store, bot_token):
     """
-    دریافت یا ساخت اپلیکیشن ربات بر اساس شیء Store
+    دریافت یا ساخت اپلیکیشن ربات بر اساس شیء Store و توکنی که وب‌هوک را تریگر کرده
     """
-    token_key = store.telegram_bot_token if store.platform == 'telegram' else store.bale_bot_token
-    if not token_key:
-        token_key = store.telegram_bot_token or store.bale_bot_token
-        
-    if token_key not in bot_applications:
-        platform = store.platform
+    if bot_token not in bot_applications:
+        # تشخیص پلتفرم از روی توکن دریافتی
+        is_bale = (bot_token == store.bale_bot_token)
         
         persistence = RedisTenantPersistence(store_id=store.id)
-        builder = Application.builder().token(token_key).persistence(persistence)
+        builder = Application.builder().token(bot_token).persistence(persistence)
         
-        if platform == 'bale':
+        if is_bale:
             builder = builder.base_url('https://tapi.bale.ai/bot')
             
         application = builder.build()
@@ -158,6 +157,7 @@ def get_bot_application(store):
         from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters
         import os
 
+        # این متغیر برای fallback یا ادمین کل سیستم حفظ می‌شود
         ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
 
         calculator_conv_handler = ConversationHandler(
@@ -195,9 +195,10 @@ def get_bot_application(store):
         application.add_handler(support_conv_handler)
         application.add_handler(admin_handler)
         
-        bot_applications[token_key] = application
+        bot_applications[bot_token] = application
         
-    return bot_applications[token_key]
+    return bot_applications[bot_token]
+
 
 class TelegramWebhookView(APIView):
     permission_classes = []

@@ -5,11 +5,11 @@ from .services import setup_store_webhooks  # 👈 سرویس تنظیم وب‌
 
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
-    list_display = ('bot_username', 'owner', 'get_customers_count', 'is_active', 'created_at')
+    list_display = ('get_store_name', 'owner', 'get_customers_count', 'is_active', 'created_at')
     list_filter = ('is_active', 'created_at')
     
     # فیلدهای جستجو اصلاح شدند
-    search_fields = ('bot_username', 'telegram_bot_token', 'bale_bot_token', 'owner__phone_number', 'zarinpal_merchant_id')   
+    search_fields = ('telegram_bot_username', 'bale_bot_username', 'telegram_bot_token', 'bale_bot_token', 'owner__phone_number')    
     list_editable = ('is_active',)
     autocomplete_fields = ('owner',)
     readonly_fields = ('id', 'created_at')
@@ -19,8 +19,11 @@ class StoreAdmin(admin.ModelAdmin):
             'fields': ('id', 'owner', 'is_active')
         }),
         ('تنظیمات پیام‌رسان‌ها (تلگرام و بله)', {
-            'fields': ('telegram_bot_token', 'bale_bot_token', 'bot_username', 'channel_id', 'admin_chat_id'),
-            'description': 'توجه: پس از تغییر توکن ربات‌ها، از منوی اکشن‌ها "تنظیم وب‌هوک" را اجرا کنید.'
+            # تغییر به نام‌های جدید
+            'fields': (
+                'telegram_bot_token', 'telegram_bot_username', 'channel_id_telegram', 'admin_chat_id_telegram',
+                'bale_bot_token', 'bale_bot_username', 'channel_id_bale', 'admin_chat_id_bale'
+            ),
         }),
         ('تنظیمات درگاه پرداخت', {
             'fields': ('zarinpal_merchant_id',)
@@ -32,6 +35,10 @@ class StoreAdmin(admin.ModelAdmin):
 
     actions = ['setup_telegram_webhook']
 
+    @admin.display(description='نام ربات')
+    def get_store_name(self, obj):
+        return obj.telegram_bot_username or obj.bale_bot_username or "بدون نام"
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.annotate(customers_count=Count('customers'))
@@ -68,11 +75,12 @@ class StoreCustomerAdmin(admin.ModelAdmin):
     list_filter = ('is_blocked', 'store', 'joined_at')
     
     search_fields = (
-        'user__phone_number', 
-        'user__first_name', 
-        'user__last_name', 
-        'store__bot_username'
-    )
+            'user__phone_number', 
+            'user__first_name', 
+            'user__last_name', 
+            'store__telegram_bot_username', # تغییر یافت
+            'store__bale_bot_username'      # اضافه شد
+        )
     
     autocomplete_fields = ('store', 'user')
     list_editable = ('is_blocked',)

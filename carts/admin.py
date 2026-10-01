@@ -58,7 +58,7 @@ class CartAdmin(admin.ModelAdmin):
     )
     
     list_filter = ('is_paid', 'created_at', 'store')
-    search_fields = ('user__phone_number', 'id', 'store__bot_username')
+    search_fields = ('user__phone_number', 'store__telegram_bot_username', 'store__bale_bot_username')    
     inlines = [CartItemInline]
     
     readonly_fields = (

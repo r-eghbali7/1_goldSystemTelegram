@@ -19,7 +19,7 @@ class Store(models.Model):
     admin_chat_id_telegram = models.CharField(max_length=100, null=True, blank=True, verbose_name="چت آیدی ادمین برای پشتیبانی تلگرام")
     bale_bot_token = models.CharField(max_length=255, blank=True, null=True, verbose_name="توکن ربات بله")
     bale_bot_username = models.CharField(max_length=255, blank=True, null=True, verbose_name="یوزرنیم ربات بله")
-    channel_id_telegram = models.CharField(max_length=100, null=True, blank=True, verbose_name="آیدی کانال بله")
+    channel_id_bale = models.CharField(max_length=100, null=True, blank=True, verbose_name="آیدی کانال بله")
     admin_chat_id_bale = models.CharField(max_length=100, null=True, blank=True, verbose_name="چت آیدی ادمین برای پشتیبانی بله")
 
     is_active = models.BooleanField(default=True)
@@ -27,8 +27,7 @@ class Store(models.Model):
     zarinpal_merchant_id = models.CharField(max_length=36, blank=True, null=True, verbose_name="مرچنت آیدی زرین‌پال")
     
     def __str__(self):
-        return self.bot_username or str(self.id)
-
+        return self.telegram_bot_username or self.bale_bot_username or str(self.id)
 
 
 class StoreCustomer(models.Model):

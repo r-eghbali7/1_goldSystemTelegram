@@ -36,7 +36,7 @@ class OrderAdmin(TenantModelAdmin):
     )
     
     list_filter = TenantModelAdmin.list_filter + ('status', 'created_at')
-    search_fields = ('user__phone_number', 'ref_id', 'authority', 'id', 'store__bot_username')
+    search_fields = ('user__phone_number', 'store__telegram_bot_username', 'store__bale_bot_username')    
     inlines = [OrderItemInline]
     actions = ['export_orders_as_excel']
     
@@ -105,7 +105,7 @@ class OrderAdmin(TenantModelAdmin):
             ws.append([
                 str(order.id),
                 order.user.phone_number if order.user else 'مهمان',
-                order.store.bot_username if order.store else 'ناشناس',
+                order.store.telegram_bot_username or order.store.bale_bot_username if order.store else 'ناشناس',
                 int(order.total_amount),
                 persian_status,
                 order.ref_id or 'ندارد',

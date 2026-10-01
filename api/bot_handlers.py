@@ -438,16 +438,26 @@ async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return SUPPORT_MODE
 
+
 @sync_to_async
-def get_store_admin_id():
+def get_store_admin_id(bot_token):
     store_id = get_current_store()
     from stores.models import Store
     store = Store.objects.filter(id=store_id).first()
-    return store.admin_chat_id if store else ADMIN_CHAT_ID
+    
+    if store:
+        if bot_token == store.telegram_bot_token:
+            return store.admin_chat_id_telegram
+        elif bot_token == store.bale_bot_token:
+            return store.admin_chat_id_bale
+            
+    return ADMIN_CHAT_ID
+
 
 async def send_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    admin_chat_id = await get_store_admin_id()
+    admin_chat_id = await get_store_admin_id(context.bot.token)
+    
     if not admin_chat_id:
         await update.message.reply_text("❌ پشتیبانی برای این فروشگاه فعال نشده است.")
         return SUPPORT_MODE
@@ -466,7 +476,7 @@ async def exit_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def admin_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_chat_id = await get_store_admin_id()
+    admin_chat_id = await get_store_admin_id(context.bot.token)
     if str(update.message.chat_id) == str(admin_chat_id) and update.message.reply_to_message:
         original_text = update.message.reply_to_message.text
         if original_text and "آیدی عددی:" in original_text:

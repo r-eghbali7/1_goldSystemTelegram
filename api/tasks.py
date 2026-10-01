@@ -21,7 +21,7 @@ def process_telegram_update_task(bot_token, update_data):
 
     async def run_bot_update():
         # 👇 ارسال شیء کامل store به تابع
-        application = get_bot_application(store)
+        application = get_bot_application(store, bot_token) 
         update = Update.de_json(update_data, application.bot)
         
         await application.initialize()
