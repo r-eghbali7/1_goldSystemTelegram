@@ -8,5 +8,5 @@ urlpatterns = [
     path('checkout/', CheckoutAPIView.as_view(), name='checkout'),
     
     # آدرس بازگشت از زرین‌پال (همان CALLBACK_URL تنظیم شده در ویو زرین‌پال)
-    path('payment/callback/', zarinpal_callback_view, name='zarinpal-callback'),
+path('payment/callback/', zarinpal_callback_view, name='zarinpal-callback'),
 ]

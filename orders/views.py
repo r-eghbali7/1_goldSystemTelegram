@@ -105,38 +105,59 @@ class CheckoutAPIView(views.APIView):
 
 
         
+# orders/views.py
+import requests
+import json
+from django.http import HttpResponse
+from decouple import config
+from .models import Order
+from .tasks import send_telegram_receipt
+
+MERCHANT_ID = config('ZARINPAL_MERCHANT_ID')
+ZARINPAL_VERIFY_URL = 'https://api.zarinpal.com/pg/v4/payment/verify.json'
+
 def zarinpal_callback_view(request):
-    # [کدهای قبلی zarinpal_callback_view را دقیقاً اینجا قرار دهید]
     authority = request.GET.get('Authority')
     status_payment = request.GET.get('Status')
 
     if status_payment != 'OK':
         Order.objects.filter(authority=authority).update(status='failed')
-        return HttpResponse("پرداخت لغو شد یا ناموفق بود.")
+        return HttpResponse("پرداخت لغو شد یا ناموفق بود. می‌توانید پنجره را بسته و به ربات بازگردید.")
 
     try:
         order = Order.objects.get(authority=authority)
     except Order.DoesNotExist:
         return HttpResponse("سفارش یافت نشد.")
 
+    # جلوگیری از وریفای مجدد فاکتوری که قبلاً پرداخت شده است
+    if order.status == 'paid':
+        return HttpResponse("این فاکتور قبلاً با موفقیت پرداخت شده است. می‌توانید به ربات بازگردید.")
+
     data = {
         "merchant_id": MERCHANT_ID,
-        "amount": int(order.total_amount) * 10,
+        "amount": int(order.total_amount) * 10,  # تبدیل به ریال
         "authority": authority
     }
     headers = {'content-type': 'application/json', 'accept': 'application/json'}
 
-    response = requests.post(ZARINPAL_VERIFY_URL, data=json.dumps(data), headers=headers)
-    result = response.json()
+    try:
+        response = requests.post(ZARINPAL_VERIFY_URL, data=json.dumps(data), headers=headers, timeout=10)
+        result = response.json()
 
-    if response.status_code == 200 and result['data']['code'] in [100, 101]:
-        ref_id = result['data']['ref_id']
-        order.status = 'paid'
-        order.ref_id = ref_id
-        order.save()
-        send_telegram_receipt.delay(order.id)
-        return HttpResponse(f"پرداخت با موفقیت انجام شد. کد پیگیری: {ref_id}")
-    else:
-        order.status = 'failed'
-        order.save()
-        return HttpResponse("تراکنش ناموفق بود یا تایید نشد.")
+        if response.status_code == 200 and result['data']['code'] in [100, 101]:
+            ref_id = result['data']['ref_id']
+            order.status = 'paid'
+            order.ref_id = ref_id
+            order.save()
+            
+            # ارسال رسید به صورت ناهمگام (سلری تشخیص می‌دهد بله است یا تلگرام)
+            send_telegram_receipt.delay(order.id)
+            
+            return HttpResponse(f"پرداخت با موفقیت انجام شد. کد پیگیری: {ref_id}<br><br>اکنون می‌توانید به ربات پیام‌رسان بازگردید.")
+        else:
+            order.status = 'failed'
+            order.save()
+            return HttpResponse("تراکنش ناموفق بود یا توسط بانک تایید نشد.")
+            
+    except requests.exceptions.RequestException:
+        return HttpResponse("خطا در برقراری ارتباط با سرورهای زرین‌پال. لطفاً با پشتیبانی تماس بگیرید.")

@@ -5,34 +5,20 @@ from .services import setup_store_webhooks  # 👈 سرویس تنظیم وب‌
 
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
-    list_display = (
-        'bot_username', 
-        'owner', 
-        'platform',
-        'get_customers_count', 
-        'is_active', 
-        'created_at'
-    )
+    list_display = ('bot_username', 'owner', 'get_customers_count', 'is_active', 'created_at')
+    list_filter = ('is_active', 'created_at')
     
-    list_filter = ('platform', 'is_active', 'created_at')
-    search_fields = (
-        'bot_username', 
-        'telegram_bot_token',  # جایگزین bot_token
-        'bale_bot_token',      # جایگزین bot_token
-        'owner__phone_number', 
-        'zarinpal_merchant_id'
-    )    
+    # فیلدهای جستجو اصلاح شدند
+    search_fields = ('bot_username', 'telegram_bot_token', 'bale_bot_token', 'owner__phone_number', 'zarinpal_merchant_id')   
     list_editable = ('is_active',)
     autocomplete_fields = ('owner',)
     readonly_fields = ('id', 'created_at')
-    list_select_related = ('owner',)
 
     fieldsets = (
         ('اطلاعات پایه و مالکیت', {
             'fields': ('id', 'owner', 'is_active')
         }),
         ('تنظیمات پیام‌رسان‌ها (تلگرام و بله)', {
-            # توکن‌های جدید جایگزین توکن قبلی شدند
             'fields': ('telegram_bot_token', 'bale_bot_token', 'bot_username', 'channel_id', 'admin_chat_id'),
             'description': 'توجه: پس از تغییر توکن ربات‌ها، از منوی اکشن‌ها "تنظیم وب‌هوک" را اجرا کنید.'
         }),
@@ -44,7 +30,6 @@ class StoreAdmin(admin.ModelAdmin):
         }),
     )
 
-    # 👈 معرفی اکشن به کلاس ادمین
     actions = ['setup_telegram_webhook']
 
     def get_queryset(self, request):
@@ -55,53 +40,31 @@ class StoreAdmin(admin.ModelAdmin):
     def get_customers_count(self, obj):
         return obj.customers_count
 
-    # 👈 پیاده‌سازی منطق اکشن سفارشی
     @admin.action(description='تنظیم وب‌هوک (Webhook) تلگرام/بله برای ربات‌های انتخاب شده')
     def setup_telegram_webhook(self, request, queryset):
         success_count = 0
-        
         for store in queryset:
-            if not store.bot_token:
-                self.message_user(request, f"فروشگاه {store.id} توکن ندارد.", level=messages.WARNING)
+            # بررسی وجود حداقل یک توکن
+            if not store.telegram_bot_token and not store.bale_bot_token:
+                self.message_user(request, f"فروشگاه {store.id} هیچ توکنی ندارد.", level=messages.WARNING)
                 continue
                 
             try:
-                response = setup_store_webhooks(store.bot_token, store.platform)                
-                # بررسی پاسخ سرور تلگرام
-                if response.get('ok'):
-                    success_count += 1
-                else:
-                    error_msg = response.get('description', 'خطای نامشخص')
-                    self.message_user(
-                        request, 
-                        f"خطا در تنظیم وب‌هوک برای ربات {store.bot_username or store.id}: {error_msg}", 
-                        level=messages.ERROR
-                    )
+                # فراخوانی صحیح سرویس با یک آرگومان (ارسال خودِ شیء store)
+                results = setup_store_webhooks(store)                
+                for res in results:
+                    self.message_user(request, res, level=messages.SUCCESS)
+                success_count += 1
             except Exception as e:
                 self.message_user(
                     request, 
-                    f"خطای ارتباط با سرور تلگرام برای ربات {store.bot_username or store.id}: {str(e)}", 
+                    f"خطای ارتباط با سرور برای ربات {store.bot_username or store.id}: {str(e)}", 
                     level=messages.ERROR
                 )
-        
-        if success_count > 0:
-            self.message_user(
-                request, 
-                f"وب‌هوک {success_count} ربات با موفقیت روی سرور تنظیم شد.", 
-                level=messages.SUCCESS
-            )
-
 
 @admin.register(StoreCustomer)
 class StoreCustomerAdmin(admin.ModelAdmin):
-    list_display = (
-        'user', 
-        'store', 
-        'get_formatted_total_spent', 
-        'is_blocked', 
-        'joined_at'
-    )
-    
+    list_display = ('user', 'store', 'get_formatted_total_spent', 'is_blocked', 'joined_at')
     list_filter = ('is_blocked', 'store', 'joined_at')
     
     search_fields = (

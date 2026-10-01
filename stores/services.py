@@ -1,19 +1,26 @@
 import httpx
 
 def setup_store_webhooks(store):
-    domain = "https://parsiancoine.ir" # دامنه سرور شما
+    # آدرس Ngrok خود را برای تست لوکال اینجا قرار دهید
+    domain = "https://ripe-kings-read.loca.lt" 
     results = []
     
-    # ۱. تنظیم وب‌هوک تلگرام
     if store.telegram_bot_token:
         url = f"{domain}/api/v1/webhook/{store.telegram_bot_token}/"
         res = httpx.post(f"https://api.telegram.org/bot{store.telegram_bot_token}/setWebhook", data={"url": url})
-        results.append(f"Telegram: {res.json().get('description')}")
-        
-    # ۲. تنظیم وب‌هوک بله
+        data = res.json()
+        if data.get('ok'):
+            results.append(f"✅ تلگرام: {data.get('description')}")
+        else:
+            results.append(f"❌ خطای تلگرام: {data.get('description')}")
+            
     if store.bale_bot_token:
         url = f"{domain}/api/v1/webhook/{store.bale_bot_token}/"
         res = httpx.post(f"https://tapi.bale.ai/bot{store.bale_bot_token}/setWebhook", data={"url": url})
-        results.append(f"Bale: {res.json().get('description')}")
-        
+        data = res.json()
+        if data.get('ok'):
+            results.append(f"✅ بله: {data.get('description')}")
+        else:
+            results.append(f"❌ خطای بله: {data.get('description')}")
+            
     return results
