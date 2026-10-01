@@ -1,13 +1,19 @@
-# stores/services.py
 import httpx
-from django.conf import settings
 
-def set_telegram_webhook(bot_token):
-    # آدرس سرور شما (باید HTTPS باشد)
-    domain = "https://parsiancoine.ir"
-    webhook_url = f"{domain}/api/v1/webhook/{bot_token}/"
+def setup_store_webhooks(store):
+    domain = "https://parsiancoine.ir" # دامنه سرور شما
+    results = []
     
-    telegram_api = f"https://api.telegram.org/bot{bot_token}/setWebhook"
-    
-    response = httpx.post(telegram_api, data={"url": webhook_url})
-    return response.json()
+    # ۱. تنظیم وب‌هوک تلگرام
+    if store.telegram_bot_token:
+        url = f"{domain}/api/v1/webhook/{store.telegram_bot_token}/"
+        res = httpx.post(f"https://api.telegram.org/bot{store.telegram_bot_token}/setWebhook", data={"url": url})
+        results.append(f"Telegram: {res.json().get('description')}")
+        
+    # ۲. تنظیم وب‌هوک بله
+    if store.bale_bot_token:
+        url = f"{domain}/api/v1/webhook/{store.bale_bot_token}/"
+        res = httpx.post(f"https://tapi.bale.ai/bot{store.bale_bot_token}/setWebhook", data={"url": url})
+        results.append(f"Bale: {res.json().get('description')}")
+        
+    return results

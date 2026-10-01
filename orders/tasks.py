@@ -1,64 +1,67 @@
 import asyncio
 from celery import shared_task
 from telegram import Bot
+# ایمپورت خطاهای اختصاصی کتابخانه تلگرام
+from telegram.error import NetworkError, TimedOut, TelegramError 
 from decouple import config
 from .models import Order
 
-@shared_task
-def send_telegram_receipt(order_id):
-    """
-    ارسال پیام موفقیت آمیز بودن خرید به خریدار و ادمین مختص به همان فروشگاه
-    """
+# ۱. اضافه کردن قابلیت bind و محدودیت‌های تلاش مجدد به دکوراتور
+@shared_task(bind=True, max_retries=5, default_retry_delay=60)
+def send_telegram_receipt(self, order_id):
     try:
-        # واکشی سفارش به همراه اطلاعات کاربر و فروشگاه (برای بهینه‌سازی کوئری)
         order = Order.objects.select_related('user', 'store').get(id=order_id)
     except Order.DoesNotExist:
         return "سفارش یافت نشد."
 
     store = order.store
     
-    # دریافت توکن ربات و آیدی ادمین از تنظیمات فروشگاه در دیتابیس
-    bot_token = store.bot_token
+    # تشخیص هوشمند پلتفرم و توکن بر اساس معماری چندکاناله
+    platform = getattr(store, 'platform', 'telegram') 
+    bot_token = store.bale_bot_token if platform == 'bale' else store.telegram_bot_token
     admin_chat_id = store.admin_chat_id
 
     if not bot_token:
         return "توکن ربات برای این فروشگاه ثبت نشده است."
 
-    bot = Bot(token=bot_token)
+    base_url = "https://tapi.bale.ai/bot" if platform == 'bale' else "https://api.telegram.org/bot"
+    bot = Bot(token=bot_token, base_url=base_url)
 
-    # متن پیام خریدار
-    buyer_text = (
-        f"✅ پرداخت شما در {store.bot_username or 'گالری'} با موفقیت تایید شد!\n\n"
-        f"شماره سفارش: {order.id}\n"
-        f"مبلغ پرداختی: {order.total_amount:,} تومان\n"
-        f"کد پیگیری تراکنش: {order.ref_id}\n\n"
-        f"سفارش شما به زودی پردازش می‌شود."
-    )
-
-    # متن پیام ادمین فروشگاه
-    admin_text = (
-        f"💰 یک سفارش جدید در فروشگاه شما با موفقیت ثبت و پرداخت شد!\n\n"
-        f"📱 شماره مشتری: {order.user.phone_number}\n"
-        f"💵 مبلغ: {order.total_amount:,} تومان\n"
-        f"🧾 کد پیگیری زرین‌پال: {order.ref_id}\n"
-        f"🔗 شناسه سفارش: {order.id}"
-    )
+    buyer_text = f"✅ پرداخت شما در {store.bot_username or 'گالری'} با موفقیت تایید شد!\nشماره سفارش: {order.id}\nمبلغ پرداختی: {order.total_amount:,} تومان\nکد پیگیری تراکنش: {order.ref_id}"
+    admin_text = f"💰 یک سفارش جدید در فروشگاه شما با موفقیت ثبت و پرداخت شد!\nشماره مشتری: {order.user.phone_number}\nمبلغ: {order.total_amount:,} تومان\nکد پیگیری زرین‌پال: {order.ref_id}"
 
     async def send_messages():
+        network_failure = False
+        
         # ارسال به خریدار
         if order.user.chat_id:
             try:
                 await bot.send_message(chat_id=order.user.chat_id, text=buyer_text)
-            except Exception as e:
-                print(f"Failed to send message to user: {e}")
-        
-        # ارسال فقط به ادمین همین فروشگاه
+            except (NetworkError, TimedOut):
+                # خطای سرور یا اینترنت - نیاز به تلاش مجدد
+                network_failure = True 
+            except TelegramError as e:
+                # خطای منطقی (مثلا کاربر ربات را بلاک کرده) - تلاش مجدد نیاز نیست
+                print(f"Logic Error (Buyer): {e}")
+
+        # ارسال به ادمین
         if admin_chat_id:
             try:
                 await bot.send_message(chat_id=admin_chat_id, text=admin_text)
-            except Exception as e:
-                print(f"Failed to send message to admin: {e}")
+            except (NetworkError, TimedOut):
+                network_failure = True
+            except TelegramError as e:
+                print(f"Logic Error (Admin): {e}")
 
-    # اجرای حلقه رویداد
-    asyncio.run(send_messages())
-    return f"رسید با موفقیت برای کاربر و ادمین فروشگاه {store.id} ارسال شد."
+        return network_failure
+
+    # ۲. اجرای توابع و دریافت وضعیت قطعی شبکه
+    has_network_errors = asyncio.run(send_messages())
+    
+    # ۳. در صورت بروز خطای شبکه، تسک به صف باز می‌گردد
+    if has_network_errors:
+        # تأخیر تصاعدی (Exponential Backoff): زمان صبر در هر تلاش دو برابر می‌شود
+        countdown = self.default_retry_delay * (2 ** self.request.retries)
+        raise self.retry(exc=Exception("Network Timeout - Retrying"), countdown=countdown)
+
+    return f"رسید برای فروشگاه {store.id} با موفقیت پردازش شد."

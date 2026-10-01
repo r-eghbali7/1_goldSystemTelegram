@@ -1,19 +1,27 @@
 from django.contrib import admin, messages
 from django.db.models import Count
 from .models import Store, StoreCustomer
-from .services import set_telegram_webhook  # 👈 سرویس تنظیم وب‌هوک را ایمپورت کنید
+from .services import setup_store_webhooks  # 👈 سرویس تنظیم وب‌هوک را ایمپورت کنید
 
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
     list_display = (
         'bot_username', 
         'owner', 
+        'platform',
         'get_customers_count', 
         'is_active', 
         'created_at'
     )
-    list_filter = ('is_active', 'created_at')
-    search_fields = ('bot_username', 'bot_token', 'owner__phone_number', 'zarinpal_merchant_id')
+    
+    list_filter = ('platform', 'is_active', 'created_at')
+    search_fields = (
+        'bot_username', 
+        'telegram_bot_token',  # جایگزین bot_token
+        'bale_bot_token',      # جایگزین bot_token
+        'owner__phone_number', 
+        'zarinpal_merchant_id'
+    )    
     list_editable = ('is_active',)
     autocomplete_fields = ('owner',)
     readonly_fields = ('id', 'created_at')
@@ -23,9 +31,10 @@ class StoreAdmin(admin.ModelAdmin):
         ('اطلاعات پایه و مالکیت', {
             'fields': ('id', 'owner', 'is_active')
         }),
-        ('تنظیمات ربات تلگرام', {
-            'fields': ('bot_token', 'bot_username', 'channel_id', 'admin_chat_id'),
-            'description': 'توجه: پس از تغییر توکن ربات، از منوی اکشن‌ها "تنظیم وب‌هوک" را اجرا کنید.'
+        ('تنظیمات پیام‌رسان‌ها (تلگرام و بله)', {
+            # توکن‌های جدید جایگزین توکن قبلی شدند
+            'fields': ('telegram_bot_token', 'bale_bot_token', 'bot_username', 'channel_id', 'admin_chat_id'),
+            'description': 'توجه: پس از تغییر توکن ربات‌ها، از منوی اکشن‌ها "تنظیم وب‌هوک" را اجرا کنید.'
         }),
         ('تنظیمات درگاه پرداخت', {
             'fields': ('zarinpal_merchant_id',)
@@ -47,18 +56,17 @@ class StoreAdmin(admin.ModelAdmin):
         return obj.customers_count
 
     # 👈 پیاده‌سازی منطق اکشن سفارشی
-    @admin.action(description='تنظیم وب‌هوک (Webhook) تلگرام برای ربات‌های انتخاب شده')
+    @admin.action(description='تنظیم وب‌هوک (Webhook) تلگرام/بله برای ربات‌های انتخاب شده')
     def setup_telegram_webhook(self, request, queryset):
         success_count = 0
         
         for store in queryset:
             if not store.bot_token:
-                self.message_user(request, f"فروشگاه {store.id} توکن تلگرام ندارد.", level=messages.WARNING)
+                self.message_user(request, f"فروشگاه {store.id} توکن ندارد.", level=messages.WARNING)
                 continue
                 
             try:
-                response = set_telegram_webhook(store.bot_token)
-                
+                response = setup_store_webhooks(store.bot_token, store.platform)                
                 # بررسی پاسخ سرور تلگرام
                 if response.get('ok'):
                     success_count += 1

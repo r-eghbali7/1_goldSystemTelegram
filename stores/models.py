@@ -3,10 +3,18 @@ import uuid
 from django.db import models
 from accounts.models import User
 
+
+PLATFORM_CHOICES = (
+    ('telegram', 'تلگرام'),
+    ('bale', 'بله'),
+)
+
 class Store(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stores', verbose_name="صاحب فروشگاه")
-    bot_token = models.CharField(max_length=100, unique=True, verbose_name="توکن ربات تلگرام")
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='telegram', verbose_name="پلتفرم")
+    telegram_bot_token = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="توکن تلگرام")
+    bale_bot_token = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="توکن بله")
     bot_username = models.CharField(max_length=100, null=True, blank=True, verbose_name="یوزرنیم ربات")
     channel_id = models.CharField(max_length=100, null=True, blank=True, verbose_name="آیدی کانال")
     admin_chat_id = models.CharField(max_length=100, null=True, blank=True, verbose_name="چت آیدی ادمین برای پشتیبانی")

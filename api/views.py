@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from rest_framework.views import APIView
-from telegram import Update, Bot
+from django.db.models import Q
 from telegram.ext import Application
 from api.persistence import RedisTenantPersistence
 from api.tasks import process_telegram_update_task
@@ -125,38 +125,23 @@ bot_applications = {}
 
 def get_bot_application(bot_token):
     if bot_token not in bot_applications:
-        # ساختن نمونه اپلیکیشن برای ربات خاص
-        application = Application.builder().token(bot_token).build()
-        
-        # هندلرهای خود را اینجا اضافه کنید (مثل کد قبلی خودتان)
-        # application.add_handler(CommandHandler("start", start))
-        # application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
-        
-        bot_applications[bot_token] = application
-    return bot_applications[bot_token]
-
-
-# کش کردن اپلیکیشن‌های تلگرام
-bot_applications = {}
-
-def get_bot_application(bot_token):
-    if bot_token not in bot_applications:
-        # واکشی فروشگاه برای گرفتن ID و ساخت پیشوند دیتابیس
-        store = Store.objects.get(bot_token=bot_token, is_active=True)
-        
-        # معرفی Redis به عنوان منبع ذخیره وضعیت‌ها
-        persistence = RedisTenantPersistence(store_id=store.id)
-        
-        application = (
-            Application.builder()
-            .token(bot_token)
-            .persistence(persistence)
-            .build()
+        # 👇 جستجو در هر دو ستون برای پیدا کردن فروشگاه
+        store = Store.objects.get(
+            Q(telegram_bot_token=bot_token) | Q(bale_bot_token=bot_token), 
+            is_active=True
         )
         
-        # هندلرهای خود را اینجا اضافه کنید
-        # application.add_handler(...)
+        # 👇 جادوی کار اینجاست: تشخیص پلتفرم از روی توکن تطبیق داده شده
+        platform = 'telegram' if store.telegram_bot_token == bot_token else 'bale'
         
+        persistence = RedisTenantPersistence(store_id=store.id)
+        builder = Application.builder().token(bot_token).persistence(persistence)
+        
+        # تنظیم سرور بله در صورت نیاز
+        if platform == 'bale':
+            builder = builder.base_url('https://tapi.bale.ai/bot')
+            
+        application = builder.build()
         bot_applications[bot_token] = application
         
     return bot_applications[bot_token]
