@@ -150,3 +150,13 @@ class OrderAdmin(TenantModelAdmin):
         
     def has_add_permission(self, request):
         return False
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        # اگر کاربر سوپریوزر نبود، فقط محصولات فروشگاه خودش را نشان بده
+        if not request.user.is_superuser:
+            user_store = request.user.stores.first() # ارتباط مالک با فروشگاه
+            if user_store:
+                return qs.filter(store=user_store)
+            return qs.none()
+        return qs

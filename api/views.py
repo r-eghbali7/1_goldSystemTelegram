@@ -16,10 +16,8 @@ from products.models import Product
 from carts.models import Cart, CartItem
 from orders.models import Order, OrderItem
 from orders.services import generate_payment_link
-from .bot_handlers import add_to_cart_callback, admin_reply_handler, calc_get_profit, calc_get_tax, calc_get_wage, calc_get_weight, change_page, enter_support, exit_support, handle_contact, process_checkout, refresh_live_rates, send_to_admin, show_live_rates, start, start_calculator, view_cart, view_shop
 from .serializers import ProductSerializer, CartSerializer
 from .throttling import BotTokenThrottle, TelegramUserThrottle # 👈 اضافه شد
-
 
 
 # 1. API محصولات (نمایش، صفحه‌بندی و فیلتر)
@@ -129,9 +127,6 @@ def get_bot_application(store, bot_token):
     ساخت اپلیکیشن ربات به صورت ایزوله برای هر درخواست
     (حذف کش برای جلوگیری از تداخل Event Loop در Celery)
     """
-    from telegram.ext import Application
-    from api.persistence import RedisTenantPersistence
-    
     # تشخیص پلتفرم از روی توکن دریافتی
     is_bale = (bot_token == store.bale_bot_token)
     
@@ -142,22 +137,9 @@ def get_bot_application(store, bot_token):
         builder = builder.base_url('https://tapi.bale.ai/bot')
         
     application = builder.build()
-    
-    # ثبت هندلرها
-    from api.bot_handlers import (
-        start, handle_contact, view_cart, process_checkout,
-        fetch_and_send_products, view_shop, change_page, add_to_cart_callback,
-        show_live_rates, refresh_live_rates, start_calculator, calc_get_weight,
-        calc_get_wage, calc_get_profit, calc_get_tax, enter_support, send_to_admin,
-        exit_support, admin_reply_handler,
-        SUPPORT_MODE, CALC_WEIGHT, CALC_WAGE, CALC_PROFIT, CALC_TAX
-    )
-    from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters
-    import os
-
-    # این متغیر برای fallback یا ادمین کل سیستم حفظ می‌شود
-    ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
-
+    # ----------------------------------------------------
+    # ۱. هندلر محاسبه‌گر طلا
+    # ----------------------------------------------------
     calculator_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^محاسبه‌گر طلا 🧮$'), start_calculator)],
         states={
@@ -169,6 +151,9 @@ def get_bot_application(store, bot_token):
         fallbacks=[MessageHandler(filters.Regex('^انصراف ❌$'), calc_get_weight)]
     )
 
+    # ----------------------------------------------------
+    # ۲. هندلر پشتیبانی
+    # ----------------------------------------------------
     support_conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
         states={
@@ -177,25 +162,47 @@ def get_bot_application(store, bot_token):
         fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), exit_support)]
     )
 
+    # ----------------------------------------------------
+    # ۳. هندلر جستجوی محصول (جدید)
+    # ----------------------------------------------------
+    search_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^جستجوی محصول 🔍$'), start_search)],
+        states={
+            # دریافت متن برای جستجو (به شرطی که کلمه 'بازگشت' نباشد)
+            SEARCH_MODE: [MessageHandler(filters.TEXT & ~filters.Regex('^بازگشت 🔙$'), process_search)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), cancel_search)]
+    )
+
     admin_handler = MessageHandler(filters.REPLY, admin_reply_handler)
 
+    # ----------------------------------------------------
+    # تزریق هندلرها به اپلیکیشن ربات
+    # ----------------------------------------------------
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    
+    # دکمه‌های شیشه‌ای (Inline Keyboards)
     application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
     application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
     application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
     application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
+    
+    # پیام‌های متنی دکمه‌های کیبورد اصلی
     application.add_handler(MessageHandler(filters.Regex('^نمایش قیمت لحظه ای 💰$'), show_live_rates))
     application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
     application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
     
+    # کانورسیشن‌ها (روند‌های چند مرحله‌ای)
+    application.add_handler(search_conv_handler)
     application.add_handler(calculator_conv_handler)
     application.add_handler(support_conv_handler)
+    
+    # پاسخ ادمین
     application.add_handler(admin_handler)
     
     # برگرداندن شیء ساخته شده بدون ذخیره در دیکشنری
     return application
-
 
 class TelegramWebhookView(APIView):
     permission_classes = []

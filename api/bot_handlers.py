@@ -19,7 +19,9 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
 
 WAITING_FOR_OTP = 1
 SUPPORT_MODE = 2
+SEARCH_MODE = 10
 CALC_WEIGHT, CALC_WAGE, CALC_PROFIT, CALC_TAX = range(3, 7)
+
 
 calc_cancel_kb = ReplyKeyboardMarkup([[KeyboardButton("انصراف ❌")]], resize_keyboard=True)
 
@@ -50,13 +52,71 @@ def register_or_get_user(phone_number, chat_id, first_name, last_name, platform)
 @sync_to_async
 def get_products_page(page_number, per_page=5):
     from django.core.paginator import Paginator
+    # دریافت محصولاتی که موجود و فعال هستند
     qs = Product.objects.filter(is_active=True).order_by('-created_at')
+    
+    # تنظیم تعداد در هر صفحه (۵ محصول)
     paginator = Paginator(qs, per_page)
     try:
         page = paginator.page(page_number)
     except Exception:
-        return None, False, False
+        return [], False, False
+        
     return list(page.object_list), page.has_previous(), page.has_next()
+
+
+async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE):
+    # دریافت ۵ محصول برای صفحه درخواستی
+    products, has_prev, has_next = await get_products_page(page, per_page=5)
+
+    if not products:
+        await context.bot.send_message(chat_id, "هیچ محصولی یافت نشد.")
+        return
+
+    current_gold_price = cache.get('live_gold_18k') or 0
+
+    # ارسال ۵ محصول به صورت پیام‌های جداگانه
+    for p in products:
+        final_price = p.calculate_live_price(current_gold_price)
+        text = f"💎 **{p.title}**\n\n📝 توضیحات: {p.description}\n⚖️ وزن: {p.weight} گرم\n💰 قیمت لحظه‌ای: {final_price:,} تومان\n"
+        
+        keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p.id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if p.image and hasattr(p.image, 'path') and os.path.exists(p.image.path):
+            with open(p.image.path, 'rb') as photo_file:
+                await context.bot.send_photo(
+                    chat_id=chat_id, 
+                    photo=photo_file, 
+                    caption=text, 
+                    reply_markup=reply_markup, 
+                    parse_mode="Markdown"
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=text, 
+                reply_markup=reply_markup, 
+                parse_mode="Markdown"
+            )
+
+    # ایجاد دکمه‌های صفحه‌بندی در یک آرایه دو بعدی برای نمایش زیر هم
+    nav_buttons = []
+    
+    if has_prev:
+        nav_buttons.append([InlineKeyboardButton("نمایش محصولات قبلی ⏫", callback_data=f"page_{page-1}")])
+        
+    if has_next:
+        nav_buttons.append([InlineKeyboardButton("ادامه نمایش محصولات ⏬", callback_data=f"page_{page+1}")])
+
+    # اگر محصولی قبل یا بعد وجود داشته باشد دکمه‌ها را می‌فرستیم
+    if nav_buttons:
+        await context.bot.send_message(
+            chat_id=chat_id, 
+            text=f"📄 صفحه {page} - برای مشاهده سایر محصولات کلیک کنید:", 
+            reply_markup=InlineKeyboardMarkup(nav_buttons)
+        )
+
 
 @sync_to_async
 def get_cart_details(user_id):
@@ -71,13 +131,15 @@ def get_cart_details(user_id):
             'title': item.product.title,
             'product_type': item.product.product_type,
             'raw_gold_value': item.raw_gold_value,
-            'wage': item.wage,
+            'wage': item.wage_amount, # 👈 اصلاح شد: استفاده از پراپرتی محاسبه شده مبلغ اجرت
             'profit_value': item.profit_value,
             'tax_value': item.tax_value,
             'constant_fee': item.constant_fee,
             'final_price': item.final_item_price
         })
     return {'items': items, 'total_price': cart.total_cart_price}
+
+
 
 @sync_to_async
 def add_product_to_cart(user_id, product_id, current_gold_price):
@@ -97,11 +159,14 @@ def add_product_to_cart(user_id, product_id, current_gold_price):
 
     CartItem.objects.create(
         cart=cart, product=product, daily_gold_price=current_gold_price,
-        wage=product.wage, profit_percent=product.profit_percent,
-        tax_percent=product.tax_percent, constant_fee=product.constant_fee
+        wage_percent=product.wage_percent, # 👈 اصلاح شد: استفاده از درصد اجرت
+        profit_percent=product.profit_percent,
+        tax_percent=product.tax_percent, 
+        constant_fee=product.constant_fee
     )
     cart.refresh_expiration()
     return True, "✅ محصول با موفقیت به سبد خرید شما اضافه شد."
+
 
 @sync_to_async
 def checkout_cart(user_id, current_gold_price):
@@ -190,14 +255,87 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        # تغییر "نرخ زنده بازار 📈" به "نمایش قیمت لحظه ای 💰"
-        [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نمایش قیمت لحظه ای 💰")],
-        [KeyboardButton("سبد خرید 🛒"), KeyboardButton("محاسبه‌گر طلا 🧮")],
-        [KeyboardButton("پشتیبانی 🎧")]
+        [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("جستجوی محصول 🔍")],
+        [KeyboardButton("سبد خرید 🛒"), KeyboardButton("نمایش قیمت لحظه ای 💰")],
+        [KeyboardButton("محاسبه‌گر طلا 🧮"), KeyboardButton("پشتیبانی 🎧")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     message = update.message if update.message else update.callback_query.message
     await message.reply_text("لطفاً یک گزینه را انتخاب کنید:", reply_markup=reply_markup)
+
+
+# ----------------------------------------------------
+# تابع ارتباط با دیتابیس برای جستجوی نام محصول
+# ----------------------------------------------------
+@sync_to_async
+def search_products_by_name(query, limit=5):
+    # کلمه icontains باعث می‌شود در تمام بخشی از عنوان جستجو کند
+    qs = Product.objects.filter(is_active=True, title__icontains=query).order_by('-created_at')[:limit]
+    return list(qs)
+
+
+# ----------------------------------------------------
+# هندلرهای مربوط به روال جستجو در ربات
+# ----------------------------------------------------
+async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[KeyboardButton("بازگشت 🔙")]]
+    await update.message.reply_text(
+        "🔍 **جستجوی محصول**\n\nلطفاً کلمه‌ای از نام محصول مورد نظر خود را وارد کنید:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    return SEARCH_MODE
+
+async def process_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text
+    chat_id = update.message.chat_id
+    
+    await update.message.reply_text(f"⏳ در حال جستجو برای «{query}»...")
+    
+    products = await search_products_by_name(query)
+    
+    if not products:
+        await update.message.reply_text(
+            "❌ متأسفانه محصولی با این نام یافت نشد.\nمی‌توانید کلمه دیگری را جستجو کنید یا برای خروج دکمه «بازگشت 🔙» را بزنید."
+        )
+        return SEARCH_MODE
+
+    current_gold_price = cache.get('live_gold_18k') or 0
+
+    for p in products:
+        final_price = p.calculate_live_price(current_gold_price)
+        text = f"💎 **{p.title}**\n\n📝 توضیحات: {p.description}\n⚖️ وزن: {p.weight} گرم\n💰 قیمت لحظه‌ای: {final_price:,} تومان\n"
+        
+        keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p.id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if p.image and hasattr(p.image, 'path') and os.path.exists(p.image.path):
+            with open(p.image.path, 'rb') as photo_file:
+                await context.bot.send_photo(
+                    chat_id=chat_id, 
+                    photo=photo_file, 
+                    caption=text, 
+                    reply_markup=reply_markup, 
+                    parse_mode="Markdown"
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=text, 
+                reply_markup=reply_markup, 
+                parse_mode="Markdown"
+            )
+
+    await update.message.reply_text(
+        "✅ نتایج جستجو نمایش داده شد.\nبرای جستجوی مجدد کلمه جدیدی بفرستید، و یا برای بازگشت به منوی اصلی «بازگشت 🔙» را بزنید."
+    )
+    return SEARCH_MODE
+
+async def cancel_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("جستجو لغو شد.")
+    await show_main_menu(update, context)
+    return ConversationHandler.END
+
 
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -251,6 +389,7 @@ async def process_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(result)
 
+
 async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes.DEFAULT_TYPE):
     products, has_prev, has_next = await get_products_page(page)
 
@@ -258,19 +397,35 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
         await context.bot.send_message(chat_id, "هیچ محصولی یافت نشد.")
         return
 
+    # دریافت قیمت زنده برای محاسبه داینامیک
+    current_gold_price = cache.get('live_gold_18k') or 0
+
     for p in products:
-        text = f"💎 **{p.title}**\n\n📝 توضیحات: {p.description}\n⚖️ وزن: {p.weight} گرم\n💰 قیمت پایه: {int(p.price):,} تومان\n"
+        # محاسبه قیمت لحظه‌ای برای نمایش به کاربر
+        final_price = p.calculate_live_price(current_gold_price)
+        
+        text = f"💎 **{p.title}**\n\n📝 توضیحات: {p.description}\n⚖️ وزن: {p.weight} گرم\n💰 قیمت لحظه‌ای: {final_price:,} تومان\n"
+        
         keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p.id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        if p.image:
-            try:
-                await context.bot.send_photo(chat_id=chat_id, photo=open(p.image.path, 'rb'), caption=text, reply_markup=reply_markup, parse_mode="Markdown")
-            except Exception:
-                await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
+        # ساختار بهینه و ایمن برای جلوگیری از ارسال پیام تکراری
+        if p.image and hasattr(p.image, 'path') and os.path.exists(p.image.path):
+            with open(p.image.path, 'rb') as photo_file:
+                await context.bot.send_photo(
+                    chat_id=chat_id, 
+                    photo=photo_file, 
+                    caption=text, 
+                    reply_markup=reply_markup, 
+                    parse_mode="Markdown"
+                )
         else:
-            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode="Markdown")
-
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=text, 
+                reply_markup=reply_markup, 
+                parse_mode="Markdown"
+            )
     nav_buttons = []
     if has_prev: nav_buttons.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"page_{page-1}"))
     nav_buttons.append(InlineKeyboardButton(f"صفحه {page}", callback_data="ignore"))
@@ -287,10 +442,29 @@ async def change_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if query.data == "ignore": return
+    
     page_number = int(query.data.split('_')[1])
-    await query.edit_message_text(f"⏳ در حال بارگذاری صفحه {page_number}...")
+    
+    # پاک کردن پیام حاوی دکمه‌های صفحه‌بندی قبلی تا چت شلوغ نشود
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+        
+    # نمایش پیام انتظار به کاربر
+    wait_msg = await context.bot.send_message(
+        chat_id=query.message.chat_id, 
+        text=f"⏳ در حال بارگذاری ۵ محصول بعدی (صفحه {page_number})..."
+    )
+    
+    # دریافت و ارسال ۵ محصول جدید
     await fetch_and_send_products(query.message.chat_id, page_number, context)
-    await query.message.delete()
+    
+    # پاک کردن پیام انتظار پس از اتمام ارسال
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
 
 async def add_to_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -371,7 +545,7 @@ async def calc_get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     try:
         context.user_data['calc_weight'] = float(text)
-        await update.message.reply_text("✅ وزن ثبت شد.\n\nحالا **مبلغ کل اجرت** را به تومان وارد کنید (مثلاً 500000):")
+        await update.message.reply_text("✅ وزن ثبت شد.\n\nحالا **درصد اجرت** را وارد کنید (مثلاً 15):")
         return CALC_WAGE
     except ValueError:
         await update.message.reply_text("❌ لطفاً فقط یک عدد معتبر برای وزن وارد کنید:")
@@ -405,16 +579,18 @@ async def calc_get_profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ لطفاً فقط عدد وارد کنید:")
         return CALC_PROFIT
 
+
 async def calc_get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "انصراف ❌":
         await update.message.reply_text("عملیات لغو شد.")
         await show_main_menu(update, context)
         return ConversationHandler.END
+        
     try:
         tax_percent = float(text)
         weight = context.user_data['calc_weight']
-        wage = context.user_data['calc_wage']
+        wage_percent = context.user_data['calc_wage']
         profit_percent = context.user_data['calc_profit']
 
         live_18k_price = cache.get('live_gold_18k', 0)
@@ -423,31 +599,33 @@ async def calc_get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_main_menu(update, context)
             return ConversationHandler.END
 
+        # پیاده‌سازی فرمول دقیق
         raw_gold_value = weight * live_18k_price
-        tax_amount = raw_gold_value * (tax_percent / 100)
-        profit_amount = raw_gold_value * (profit_percent / 100)
+        wage_amount = raw_gold_value * (wage_percent / 100)
+        profit_amount = (raw_gold_value + wage_amount) * (profit_percent / 100)
+        tax_amount = (profit_amount + wage_amount) * (tax_percent / 100)
         
-        A = raw_gold_value + wage + tax_amount + profit_amount
-        B = raw_gold_value * 0.09
-        final_price = int(A - B)
+        final_price = int(raw_gold_value + wage_amount + profit_amount + tax_amount)
 
         result_text = (
             "🧾 **نتیجه محاسبه آنلاین شما:**\n\n"
             f"⚖️ وزن وارد شده: {weight} گرم\n"
-            f"💰 قیمت لحظه‌ای طلا: {live_18k_price:,} تومان\n"
+            f"💰 نرخ روز طلا: {live_18k_price:,} تومان\n"
             f"▫️ ارزش طلای خام: {int(raw_gold_value):,} تومان\n"
-            f"▫️ اجرت ساخت: {int(wage):,} تومان\n"
-            f"▫️ سود ({profit_percent}٪): {int(profit_amount):,} تومان\n"
+            f"▫️ اجرت ساخت ({wage_percent}٪): {int(wage_amount):,} تومان\n"
+            f"▫️ سود فروش ({profit_percent}٪): {int(profit_amount):,} تومان\n"
             f"▫️ مالیات ({tax_percent}٪): {int(tax_amount):,} تومان\n"
             "➖➖➖➖➖➖➖\n"
-            f"✅ **مبلغ نهایی تقریبی: {final_price:,} تومان**"
+            f"✅ **مبلغ نهایی: {final_price:,} تومان**"
         )
         await update.message.reply_text(result_text, parse_mode="Markdown")
         await show_main_menu(update, context)
         return ConversationHandler.END
+        
     except ValueError:
         await update.message.reply_text("❌ لطفاً فقط عدد وارد کنید:")
         return CALC_TAX
+
 
 async def enter_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[KeyboardButton("بازگشت 🔙")]]

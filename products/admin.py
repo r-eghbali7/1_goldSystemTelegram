@@ -12,13 +12,7 @@ class CategoryAdmin(admin.ModelAdmin):
 @admin.register(Product)
 class ProductAdmin(TenantModelAdmin):
     # نمایش ستون‌های کاربردی در لیست محصولات
-    list_display = (
-        'title', 
-        'category', 
-        'product_type_fa', 
-        'weight', 
-        'is_active'
-    )
+    list_display = ('title', 'category', 'product_type_fa', 'weight', 'is_active') # price حذف شد
     
     # اضافه کردن فیلتر نوع محصول به سایدبار ادمین
     list_filter = ('product_type', 'is_active', 'category') + TenantModelAdmin.list_filter
@@ -27,27 +21,16 @@ class ProductAdmin(TenantModelAdmin):
     # گروه‌بندی منظم فیلدها در صفحه افزودن/ویرایش محصول
     fieldsets = (
         ('اطلاعات پایه', {
-            'fields': (
-                'title', 
-                'category', 
-                'description', 
-                'image', 
-                'weight', 
-                'price', 
-                'is_active'
-            )
+            'fields': ('title', 'category', 'description', 'image', 'weight', 'is_active') # price حذف شد
         }),
         ('تنظیمات محاسبه قیمت زنده', {
             'fields': ('product_type', 'profit_percent'),
-            'description': 'نوع کالا را انتخاب کنید تا فیلدهای مربوط به فرمول آن نمایش داده شوند.'
         }),
         ('فرمول طلای زینتی', {
-            # کلاس ornamental-group برای کنترل توسط جاوااسکریپت
             'classes': ('ornamental-group',),
-            'fields': ('wage', 'tax_percent'),
+            'fields': ('wage_percent', 'tax_percent'), # wage به wage_percent تغییر کرد
         }),
         ('فرمول سکه پارسیان', {
-            # کلاس parsian-group برای کنترل توسط جاوااسکریپت
             'classes': ('parsian-group',),
             'fields': ('constant_fee',),
         }),
@@ -85,3 +68,14 @@ class ProductAdmin(TenantModelAdmin):
                 obj.image.url
             )
         return "بدون تصویر"
+
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        # اگر کاربر سوپریوزر نبود، فقط محصولات فروشگاه خودش را نشان بده
+        if not request.user.is_superuser:
+            user_store = request.user.stores.first() # ارتباط مالک با فروشگاه
+            if user_store:
+                return qs.filter(store=user_store)
+            return qs.none()
+        return qs

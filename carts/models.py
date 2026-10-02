@@ -44,14 +44,13 @@ class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items', verbose_name="سبد خرید")
     product = models.ForeignKey(Product, on_delete=models.CASCADE, verbose_name="محصول")
     
-    # --- اسنپ‌شات (Snapshot) قیمت‌ها و فرمول‌ها در زمان ثبت ---
     daily_gold_price = models.DecimalField(
         max_digits=12, decimal_places=0, validators=[MinValueValidator(0)], 
         verbose_name="قیمت روز طلا 18 عیار (زمان ثبت)"
     )
     
-    # فیلدهای فرمول (از مدل Product کپی می‌شوند تا اگر فروشنده فرمول را تغییر داد، سبدهای قبلی خراب نشوند)
-    wage = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="اجرت (تومان)")
+    # فیلد wage باید به wage_percent تغییر کرده باشد
+    wage_percent = models.FloatField(default=0.0, validators=[MinValueValidator(0.0)], verbose_name="درصد اجرت")
     profit_percent = models.FloatField(default=7.0, validators=[MinValueValidator(0.0)], verbose_name="درصد سود")
     tax_percent = models.FloatField(default=10.0, validators=[MinValueValidator(0.0)], verbose_name="درصد مالیات")
     constant_fee = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="مبلغ ثابت (سکه)")
@@ -62,39 +61,42 @@ class CartItem(models.Model):
 
     @property
     def raw_gold_value(self):
-        """ارزش خالص طلا = وزن × قیمت روز"""
         return float(self.product.weight) * float(self.daily_gold_price)
+
+    # 👈 این پراپرتی احتمالاً در فایل شما جا افتاده است
+    @property
+    def wage_amount(self):
+        if self.product_type == 'ornamental':
+            return self.raw_gold_value * (self.wage_percent / 100)
+        return 0.0
 
     @property
     def profit_value(self):
-        """محاسبه مبلغ سود"""
-        return self.raw_gold_value * (self.profit_percent / 100)
+        if self.product_type == 'ornamental':
+            return (self.raw_gold_value + self.wage_amount) * (self.profit_percent / 100)
+        elif self.product_type == 'parsian':
+            return self.raw_gold_value * (self.profit_percent / 100)
+        return 0.0
 
     @property
     def tax_value(self):
-        """محاسبه مبلغ مالیات"""
-        return self.raw_gold_value * (self.tax_percent / 100)
+        if self.product_type == 'ornamental':
+            return (self.profit_value + self.wage_amount) * (self.tax_percent / 100)
+        return 0.0
 
     @property
     def final_item_price(self):
-        """
-        قیمت نهایی تفکیک شده بر اساس نوع کالا.
-        این دقیقاً همان منطقی است که در Product قرار دادیم تا در پیش‌فاکتور ربات نمایش داده شود.
-        """
         raw_val = self.raw_gold_value
         
         if self.product_type == 'ornamental':
-            # A = (وزن * قیمت طلا) + اجرت + مالیات + سود
-            A = raw_val + float(self.wage) + self.tax_value + self.profit_value
-            # B = (وزن * قیمت طلا) * 0.09
-            B = raw_val * 0.09
-            return int(A - B)
+            return int(raw_val + self.wage_amount + self.profit_value + self.tax_value)
             
         elif self.product_type == 'parsian':
-            # سکه پارسیان = ارزش طلا + سود + مقدار ثابت
             return int(raw_val + self.profit_value + float(self.constant_fee))
             
         return int(raw_val)
 
     def __str__(self):
         return f"{self.product.title} در سبد {self.cart.id}"
+
+

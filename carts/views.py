@@ -64,19 +64,18 @@ class CartAPIView(views.APIView):
             )
 
         if not cart.items.filter(product=product).exists():
-            # ایجاد آیتم در سبد با ثبت دقیق مقادیر در همین لحظه (Snapshot)
             CartItem.objects.create(
                 cart=cart,
                 product=product,
                 daily_gold_price=current_gold_price,
                 
-                # مقادیر زیر مستقیماً از محصول در این لحظه کپی می‌شوند
-                wage=product.wage, 
+                wage_percent=product.wage_percent, # اصلاح شد
                 profit_percent=product.profit_percent,
                 tax_percent=product.tax_percent,
                 constant_fee=product.constant_fee
             )
-            cart.refresh_expiration() 
-            return Response({"detail": "محصول با موفقیت به سبد اضافه شد."}, status=status.HTTP_201_CREATED)
+
+        cart.refresh_expiration() 
+        return Response({"detail": "محصول با موفقیت به سبد اضافه شد."}, status=status.HTTP_201_CREATED)
 
         return Response({"detail": "این محصول قبلاً در سبد شما موجود است."}, status=status.HTTP_400_BAD_REQUEST)

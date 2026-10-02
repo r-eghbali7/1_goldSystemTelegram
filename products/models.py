@@ -25,12 +25,8 @@ class Product(TenantModel):
     title = models.CharField(max_length=200, verbose_name="عنوان محصول")
     description = models.TextField(verbose_name="توضیحات")
     
-    # استفاده از MinValueValidator برای جلوگیری از ثبت قیمت و وزن منفی
-    price = models.DecimalField(
-        max_digits=12, decimal_places=0, validators=[MinValueValidator(0)], verbose_name="قیمت (تومان)"
-    )
     weight = models.FloatField(validators=[MinValueValidator(0.0)], help_text="وزن به گرم", verbose_name="وزن")
-    wage = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="اجرت (تومان)")
+    wage_percent = models.FloatField(default=0.0, validators=[MinValueValidator(0.0)], verbose_name="درصد اجرت")
     profit_percent = models.FloatField(
         default=7.0, 
         validators=[MinValueValidator(0.0), MaxValueValidator(7.0)], 
@@ -50,30 +46,30 @@ class Product(TenantModel):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def calculate_live_price(self, live_18k_price):
-        """محاسبه قیمت نهایی بر اساس فرمول‌های درخواستی شما"""
+        """محاسبه قیمت نهایی بر اساس فرمول‌های استاندارد بازار"""
         raw_gold_value = float(self.weight) * float(live_18k_price)
         
         if self.product_type == 'ornamental':
-            # فرمول A = (وزن طلا * طلا 18 عیار) + اجرت + 10 درصد مالیات + 7 درصد سود
-            # فرض می‌کنیم درصدها از اصل طلا محاسبه می‌شوند. 
-            tax_amount = raw_gold_value * (self.tax_percent / 100)
-            profit_amount = raw_gold_value * (self.profit_percent / 100)
+            # ۱. اجرت ساخت
+            wage_amount = raw_gold_value * (self.wage_percent / 100)
             
-            A = raw_gold_value + float(self.wage) + tax_amount + profit_amount
+            # ۲. سود فروش (محاسبه روی اصل طلا + اجرت)
+            profit_amount = (raw_gold_value + wage_amount) * (self.profit_percent / 100)
             
-            # فرمول B = (وزن طلا * طلا 18 عیار) * 0.09
-            B = raw_gold_value * 0.09
+            # ۳. مالیات (محاسبه روی سود + اجرت)
+            tax_amount = (profit_amount + wage_amount) * (self.tax_percent / 100)
             
-            final_price = A - B
+            # ۴. قیمت نهایی
+            final_price = raw_gold_value + wage_amount + profit_amount + tax_amount
             return int(final_price)
             
         elif self.product_type == 'parsian':
-            # فرمول سکه پارسیان = (وزن سکه * قیمت روز طلا 18 عیار) + 7 درصد سود + مقدار ثابت
             profit_amount = raw_gold_value * (self.profit_percent / 100)
             final_price = raw_gold_value + profit_amount + float(self.constant_fee)
             return int(final_price)
             
         return int(raw_gold_value)
+    
     def __str__(self):
         return self.title
 
