@@ -2,7 +2,7 @@ import httpx
 
 def setup_store_webhooks(store):
     # آدرس Ngrok خود را برای تست لوکال اینجا قرار دهید
-    domain = "http://127.0.0.1:8000" 
+    domain = "https://tough-times-occur.loca.lt" 
     results = []
     
     if store.telegram_bot_token:

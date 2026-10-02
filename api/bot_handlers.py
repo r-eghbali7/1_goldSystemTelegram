@@ -173,19 +173,16 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 👈 تشخیص هوشمند پلتفرم از روی base_url ربات
     is_bale = 'bale' in context.bot.base_url
     platform = 'bale' if is_bale else 'telegram'
-    
+        
     user_id = await register_or_get_user(
         phone_number, 
         str(update.message.chat_id), 
         contact.first_name or "", 
         contact.last_name or "",
-        platform # پاس دادن پلتفرم به دیتابیس
+        platform
     )
+    context.user_data['user_id'] = user_id
 
-    context.user_data['user_id'] = user_id
-    user_id = await register_or_get_user(phone_number, str(update.message.chat_id), contact.first_name or "", contact.last_name or "")
-    context.user_data['user_id'] = user_id
-    
     await update.message.reply_text("✅ ثبت‌نام با موفقیت انجام شد!", reply_markup=ReplyKeyboardRemove())
     await show_main_menu(update, context)
 

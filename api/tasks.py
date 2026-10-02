@@ -20,12 +20,12 @@ def process_telegram_update_task(bot_token, update_data):
         return f"Store with token {bot_token} not found or inactive."
 
     async def run_bot_update():
-        # 👇 ارسال شیء کامل store به تابع
         application = get_bot_application(store, bot_token) 
         update = Update.de_json(update_data, application.bot)
         
-        await application.initialize()
-        await application.process_update(update)
+        # استفاده از async with برای اطمینان از مقداردهی اولیه و بستن صحیح اتصالات
+        async with application:
+            await application.process_update(update)
 
     asyncio.run(run_bot_update())
     return f"Update for store {store.telegram_bot_username or store.bale_bot_username} processed."

@@ -124,77 +124,77 @@ class CheckoutAPIView(views.APIView):
             return Response({"detail": result}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-bot_applications = {}
-
 def get_bot_application(store, bot_token):
     """
-    دریافت یا ساخت اپلیکیشن ربات بر اساس شیء Store و توکنی که وب‌هوک را تریگر کرده
+    ساخت اپلیکیشن ربات به صورت ایزوله برای هر درخواست
+    (حذف کش برای جلوگیری از تداخل Event Loop در Celery)
     """
-    if bot_token not in bot_applications:
-        # تشخیص پلتفرم از روی توکن دریافتی
-        is_bale = (bot_token == store.bale_bot_token)
+    from telegram.ext import Application
+    from api.persistence import RedisTenantPersistence
+    
+    # تشخیص پلتفرم از روی توکن دریافتی
+    is_bale = (bot_token == store.bale_bot_token)
+    
+    persistence = RedisTenantPersistence(store_id=store.id)
+    builder = Application.builder().token(bot_token).persistence(persistence)
+    
+    if is_bale:
+        builder = builder.base_url('https://tapi.bale.ai/bot')
         
-        persistence = RedisTenantPersistence(store_id=store.id)
-        builder = Application.builder().token(bot_token).persistence(persistence)
-        
-        if is_bale:
-            builder = builder.base_url('https://tapi.bale.ai/bot')
-            
-        application = builder.build()
-        
-        # ثبت هندلرها
-        from api.bot_handlers import (
-            start, handle_contact, view_cart, process_checkout,
-            fetch_and_send_products, view_shop, change_page, add_to_cart_callback,
-            show_live_rates, refresh_live_rates, start_calculator, calc_get_weight,
-            calc_get_wage, calc_get_profit, calc_get_tax, enter_support, send_to_admin,
-            exit_support, admin_reply_handler,
-            SUPPORT_MODE, CALC_WEIGHT, CALC_WAGE, CALC_PROFIT, CALC_TAX
-        )
-        from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters
-        import os
+    application = builder.build()
+    
+    # ثبت هندلرها
+    from api.bot_handlers import (
+        start, handle_contact, view_cart, process_checkout,
+        fetch_and_send_products, view_shop, change_page, add_to_cart_callback,
+        show_live_rates, refresh_live_rates, start_calculator, calc_get_weight,
+        calc_get_wage, calc_get_profit, calc_get_tax, enter_support, send_to_admin,
+        exit_support, admin_reply_handler,
+        SUPPORT_MODE, CALC_WEIGHT, CALC_WAGE, CALC_PROFIT, CALC_TAX
+    )
+    from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters
+    import os
 
-        # این متغیر برای fallback یا ادمین کل سیستم حفظ می‌شود
-        ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
+    # این متغیر برای fallback یا ادمین کل سیستم حفظ می‌شود
+    ADMIN_CHAT_ID = os.getenv("ADMIN_TELEGRAM_CHAT_ID")
 
-        calculator_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex('^محاسبه‌گر طلا 🧮$'), start_calculator)],
-            states={
-                CALC_WEIGHT: [MessageHandler(filters.TEXT, calc_get_weight)],
-                CALC_WAGE: [MessageHandler(filters.TEXT, calc_get_wage)],
-                CALC_PROFIT: [MessageHandler(filters.TEXT, calc_get_profit)],
-                CALC_TAX: [MessageHandler(filters.TEXT, calc_get_tax)],
-            },
-            fallbacks=[MessageHandler(filters.Regex('^انصراف ❌$'), calc_get_weight)]
-        )
+    calculator_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^محاسبه‌گر طلا 🧮$'), start_calculator)],
+        states={
+            CALC_WEIGHT: [MessageHandler(filters.TEXT, calc_get_weight)],
+            CALC_WAGE: [MessageHandler(filters.TEXT, calc_get_wage)],
+            CALC_PROFIT: [MessageHandler(filters.TEXT, calc_get_profit)],
+            CALC_TAX: [MessageHandler(filters.TEXT, calc_get_tax)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^انصراف ❌$'), calc_get_weight)]
+    )
 
-        support_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
-            states={
-                SUPPORT_MODE: [MessageHandler(filters.ALL & ~filters.Regex('^بازگشت 🔙$'), send_to_admin)],
-            },
-            fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), exit_support)]
-        )
+    support_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^پشتیبانی 🎧$'), enter_support)],
+        states={
+            SUPPORT_MODE: [MessageHandler(filters.ALL & ~filters.Regex('^بازگشت 🔙$'), send_to_admin)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^بازگشت 🔙$'), exit_support)]
+    )
 
-        admin_handler = MessageHandler(filters.REPLY, admin_reply_handler)
+    admin_handler = MessageHandler(filters.REPLY, admin_reply_handler)
 
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-        application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
-        application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
-        application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
-        application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
-        application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
-        application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
-        application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
-        
-        application.add_handler(calculator_conv_handler)
-        application.add_handler(support_conv_handler)
-        application.add_handler(admin_handler)
-        
-        bot_applications[bot_token] = application
-        
-    return bot_applications[bot_token]
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    application.add_handler(CallbackQueryHandler(add_to_cart_callback, pattern=r'^add_cart_'))
+    application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
+    application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
+    application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
+    application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
+    application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
+    application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
+    
+    application.add_handler(calculator_conv_handler)
+    application.add_handler(support_conv_handler)
+    application.add_handler(admin_handler)
+    
+    # برگرداندن شیء ساخته شده بدون ذخیره در دیکشنری
+    return application
 
 
 class TelegramWebhookView(APIView):
