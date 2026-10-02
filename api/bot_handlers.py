@@ -186,15 +186,19 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ ثبت‌نام با موفقیت انجام شد!", reply_markup=ReplyKeyboardRemove())
     await show_main_menu(update, context)
 
+
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نرخ زنده بازار 📈")],
+        # تغییر "نرخ زنده بازار 📈" به "نمایش قیمت لحظه ای 💰"
+        [KeyboardButton("مشاهده فروشگاه 💎"), KeyboardButton("نمایش قیمت لحظه ای 💰")],
         [KeyboardButton("سبد خرید 🛒"), KeyboardButton("محاسبه‌گر طلا 🧮")],
         [KeyboardButton("پشتیبانی 🎧")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     message = update.message if update.message else update.callback_query.message
     await message.reply_text("لطفاً یک گزینه را انتخاب کنید:", reply_markup=reply_markup)
+
 
 async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = context.user_data.get('user_id')
@@ -316,7 +320,7 @@ def get_live_rates_text():
     ounce = cache.get('live_gold_ounce', 0.0)
     mazaneh = cache.get('live_mazaneh', 0)
     
-    line_new = format_price_line("سکه امامی", cache.get('coin_new', 0), cache.get('change_coin_new', 0.0))
+    line_new = format_price_line("سکه امامی", cache.get('coin_new', 0), cache.get('change_coin_new', 0.0))    
     line_old = format_price_line("بهار آزادی", cache.get('coin_old', 0), cache.get('change_coin_old', 0.0))
     line_half = format_price_line("نیم سکه", cache.get('coin_half', 0), cache.get('change_coin_half', 0.0))
     line_quarter = format_price_line("ربع سکه", cache.get('coin_quarter', 0), cache.get('change_coin_quarter', 0.0))

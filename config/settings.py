@@ -222,4 +222,9 @@ REST_FRAMEWORK = {
 #     'https://*.loca.lt',  # این خط باعث می‌شود اگر آدرس تونل تغییر کرد هم سیستم کار کند
 # ]
 
-# CORS_ALLOW_ALL_ORIGINS = True
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.lhr.life',        # برای تونل localhost.run
+    'https://*.localhost.run',
+]
+CORS_ALLOW_ALL_ORIGINS = True
+

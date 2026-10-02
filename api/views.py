@@ -185,7 +185,7 @@ def get_bot_application(store, bot_token):
     application.add_handler(CallbackQueryHandler(change_page, pattern=r'^page_'))
     application.add_handler(CallbackQueryHandler(process_checkout, pattern=r'^process_checkout$'))
     application.add_handler(CallbackQueryHandler(refresh_live_rates, pattern=r'^refresh_rates$'))
-    application.add_handler(MessageHandler(filters.Regex('^نرخ زنده بازار 📈$'), show_live_rates))
+    application.add_handler(MessageHandler(filters.Regex('^نمایش قیمت لحظه ای 💰$'), show_live_rates))
     application.add_handler(MessageHandler(filters.Regex('^سبد خرید 🛒$'), view_cart))
     application.add_handler(MessageHandler(filters.Regex('^مشاهده فروشگاه 💎$'), view_shop))
     
