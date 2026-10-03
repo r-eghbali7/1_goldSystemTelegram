@@ -8,6 +8,7 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardR
 from telegram.ext import ContextTypes, ConversationHandler
 
 from accounts.models import User
+from accounts.services import send_otp_code, verify_otp_code
 from products.models import Product
 from carts.models import Cart, CartItem
 from orders.models import Order, OrderItem
