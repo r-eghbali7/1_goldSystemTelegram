@@ -128,6 +128,7 @@ def get_cart_details(user_id):
     items = []
     for item in cart.items.select_related('product').all():
         items.append({
+            'id': str(item.id),
             'title': item.product.title,
             'product_type': item.product.product_type,
             'raw_gold_value': item.raw_gold_value,
@@ -225,7 +226,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact = update.message.contact
-    if contact.user_id != update.message.from_user.id:
+    if contact.user_id != update.message.fromuser.id:
         await update.message.reply_text("❌ لطفاً فقط شماره تماس خودتان را با استفاده از دکمه کیبورد ارسال کنید.")
         return
 
@@ -234,23 +235,49 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif phone_number.startswith('98'): phone_number = '0' + phone_number[2:]
     elif not phone_number.startswith('0'): phone_number = '0' + phone_number
 
-    await update.message.reply_text("⏳ در حال بررسی اطلاعات...")
-    # 👈 تشخیص هوشمند پلتفرم از روی base_url ربات
-    is_bale = 'bale' in context.bot.base_url
-    platform = 'bale' if is_bale else 'telegram'
+    await update.message.reply_text("⏳ در حال ارسال پیامک تایید...")
+    
+    # ارسال پیامک با سرویس از قبل نوشته شده
+    success, msg = send_otp_code(phone_number)
+    
+    if success:
+        # ذخیره موقت اطلاعات
+        context.user_data['pending_phone'] = phone_number
+        context.user_data['pending_first'] = contact.first_name or ""
+        context.user_data['pending_last'] = contact.last_name or ""
         
-    user_id = await register_or_get_user(
-        phone_number, 
-        str(update.message.chat_id), 
-        contact.first_name or "", 
-        contact.last_name or "",
-        platform
-    )
-    context.user_data['user_id'] = user_id
+        await update.message.reply_text("✅ کد تایید ۵ رقمی برای شما پیامک شد. لطفا آن را وارد کنید:", reply_markup=ReplyKeyboardRemove())
+        return WAITING_FOR_OTP
+    else:
+        await update.message.reply_text("❌ خطا در ارسال پیامک. لطفاً دقایقی دیگر تلاش کنید.")
+        return ConversationHandler.END
 
-    await update.message.reply_text("✅ ثبت‌نام با موفقیت انجام شد!", reply_markup=ReplyKeyboardRemove())
-    await show_main_menu(update, context)
 
+async def verify_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text
+    phone_number = context.user_data.get('pending_phone')
+    
+    if verify_otp_code(phone_number, code):
+        await update.message.reply_text("⏳ در حال تکمیل ثبت‌نام...")
+        
+        is_bale = 'bale' in context.bot.base_url
+        platform = 'bale' if is_bale else 'telegram'
+            
+        user_id = await register_or_get_user(
+            phone_number, 
+            str(update.message.chat_id), 
+            context.user_data.get('pending_first'), 
+            context.user_data.get('pending_last'),
+            platform
+        )
+        context.user_data['user_id'] = user_id
+
+        await update.message.reply_text("✅ ثبت‌نام با موفقیت انجام شد!")
+        await show_main_menu(update, context)
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("❌ کد وارد شده اشتباه است یا منقضی شده. لطفا مجددا دقت کنید:")
+        return WAITING_FOR_OTP
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -350,6 +377,7 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = "🧾 **پیش فاکتور شما:**\n\n"
+    keyboard = []
     for idx, item in enumerate(cart_data['items'], 1):
         p_type = item['product_type']
         text += f"*{idx}. {item['title']}*\n"
@@ -358,16 +386,50 @@ async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"▫️️ اجرت: {int(item['wage']):,} ت\n"
             text += f"▫️ سود: {int(item['profit_value']):,} ت\n"
             text += f"▫ مالیات: {int(item['tax_value']):,} ت\n"
+            keyboard.append([InlineKeyboardButton(f"🔴 حذف {item['title']} 🔴", callback_data=f"del_item_{item['id']}")])
         elif p_type == 'parsian':
             text += f"▫️ ارزش طلا: {int(item['raw_gold_value']):,} ت\n"
             text += f"▫️ سود: {int(item['profit_value']):,} ت\n"
             text += f"▫️ بسته‌بندی/صدور: {int(item['constant_fee']):,} ت\n"
+            keyboard.append([InlineKeyboardButton(f"🔴 حذف {item['title']} 🔴", callback_data=f"del_item_{item['id']}")])
         text += f"✅ **قیمت نهایی:** {item['final_price']:,} تومان\n➖➖➖➖➖➖➖\n"
     
     text += f"💳 **مبلغ کل قابل پرداخت:** {cart_data['total_price']:,} تومان\n"
     
-    keyboard = [[InlineKeyboardButton("تسویه حساب و پرداخت 💳", callback_data="process_checkout")]]
+    keyboard.append([InlineKeyboardButton("🗑 خالی کردن کل سبد خرید 🗑", callback_data="empty_cart")])
+    keyboard.append([InlineKeyboardButton("💳 تسویه حساب و پرداخت 💳", callback_data="process_checkout")])
+    
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+@sync_to_async
+def remove_cart_item_db(item_id, user_id):
+    CartItem.objects.filter(id=item_id, cart__user_id=user_id, cart__is_paid=False).delete()
+
+
+@sync_to_async
+def empty_cart_db(user_id):
+    Cart.objects.filter(user_id=user_id, is_paid=False).delete()
+
+
+async def delete_item_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    item_id = query.data.replace('del_item_', '')
+    user_id = context.user_data.get('user_id')
+    
+    await remove_cart_item_db(item_id, user_id)
+    await query.answer("❌ محصول از سبد حذف شد", show_alert=True)
+    await query.message.delete()
+    await view_cart(update, context) # نمایش مجدد سبد
+
+async def empty_cart_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = context.user_data.get('user_id')
+    
+    await empty_cart_db(user_id)
+    await query.answer("🗑 سبد خرید خالی شد", show_alert=True)
+    await query.message.delete()
+
+
 
 async def process_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -406,7 +468,7 @@ async def fetch_and_send_products(chat_id: int, page: int, context: ContextTypes
         
         text = f"💎 **{p.title}**\n\n📝 توضیحات: {p.description}\n⚖️ وزن: {p.weight} گرم\n💰 قیمت لحظه‌ای: {final_price:,} تومان\n"
         
-        keyboard = [[InlineKeyboardButton("افزودن به سبد خرید 🛒", callback_data=f"add_cart_{p.id}")]]
+        keyboard = [[InlineKeyboardButton("🟢 افزودن به سبد خرید 🟢", callback_data=f"add_cart_{p.id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         # ساختار بهینه و ایمن برای جلوگیری از ارسال پیام تکراری
